@@ -78,7 +78,7 @@ def get_queue_radio(queue: List[Track]):
     #return FileResponse(f"./stanley6.wav", headers=headers, media_type="audio/wav")
     #return final_queue
     return radio
-@app.post("/get_radio_audio/")
+@app.post("/get_radio_audio")
 def generate_audio_from_text(textForAudio: str = Body(...)):
     print("Genereting audio")
     print(textForAudio)

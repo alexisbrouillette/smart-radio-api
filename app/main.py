@@ -8,12 +8,11 @@ from pydantic import BaseModel
 
 from typing import List
 
-
+from TTS.api import TTS
 from functions.classes import Track
 from functions.audio_gen import get_audio
 from functions.text_gen import generate_prompt, generate_text_for_song, get_llm
 
-from TTS.api import TTS
 
 
 app = FastAPI()

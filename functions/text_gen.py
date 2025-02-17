@@ -5,7 +5,7 @@ from .classes import Track
 def get_llm(): 
     return GoogleGenerativeAI(
         model="gemini-pro",
-        google_api_key="AIzaSyApQSQyEx3zKjdAvg0C6GmFk1OuxY7PUgQ",
+        google_api_key="AIzaSyA1kfa55giQ3yR5RxsbHXGl4-LboQ9_RHk",
         safety_settings={
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }

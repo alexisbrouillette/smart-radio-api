@@ -10,9 +10,9 @@ def get_audio(text, tts):
                 language="fr")
     
     
-    # del tts_stanley_fine_tuned
-    # gc.collect()
-    # torch.cuda.empty_cache()
+    #del tts_stanley_fine_tuned
+    gc.collect()
+    torch.cuda.empty_cache()
 
 def save_audio(response, file_name):
     # Writing the audio stream to the file

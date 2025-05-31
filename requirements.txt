@@ -1,7 +1,7 @@
 torch
 fastapi==0.112
 uvicorn==0.30
-TTS==0.22.0
+coqui-tts
 jieba==0.42.1
 attrs==24.1.0
 sympy==1.12

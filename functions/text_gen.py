@@ -1,7 +1,6 @@
 from langchain_google_genai import GoogleGenerativeAI, HarmBlockThreshold, HarmCategory
 
 from .classes import Track
-import lyricsgenius
 from crawl4ai import *
 from googlesearch import search
 import asyncio
@@ -113,6 +112,7 @@ def radio_host_prompt(previous_song: Track, next_song: Track, lyrics: str, web_d
         Never say you are a radio host. NEVER TALK ABOUT YOUR SHOW.
         FOCUS ON THE INFORMATIONS COMING FROM THE Next song informations. Those informations are verified and true.
         ALWAYS DEVELOP WHAT YOU ARE SAYING. DO NOT JUST LIST THE FACTS.
+        DO NO USE SYMBOLS LIKE: [, ], *, (,), but quotes are ok.
 
         Previous Song: {previous_song}
         Next Song: {next_song}
@@ -212,8 +212,6 @@ def generate_text_for_song(input: list[Track], llm):
         album_google_search_results = search_google(artist_album, 5)
         google_search_results = song_google_search_results + artist_google_search_results + album_google_search_results
         processed_results = process_search_results(google_search_results, llm)
-        print("Processed results: ", processed_results)
-        print("Lyrics: ", lyrics)
         full_text = generate_text(radio_host_prompt(input[0], input[1], lyrics, processed_results), llm)
         print("Full text: ", full_text)
     return full_text

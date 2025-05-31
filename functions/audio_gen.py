@@ -1,18 +1,27 @@
 import gc
 import torch
+import threading
 
-def get_audio(text, tts):
+# Global lock - add this at module level
+tts_lock = threading.Lock()
 
-
-    #text = text[:10]
-    tts.tts_to_file(text=text,
+def get_audio(text, tts, output_file=None):
+    with tts_lock:  # Only one TTS operation at a time
+        try:
+            result = tts.tts_to_file(
+                text=text,
                 speaker_wav="./functions/xtts_fine-tuned/stanley4.wav",
-                language="fr")
+                language="fr",
+                file_path=output_file
+            )
+            #del tts_stanley_fine_tuned
+            return result
+        except Exception as e:
+            torch.cuda.empty_cache()  # Clear CUDA cache on error
+            raise e
+
     
-    
-    #del tts_stanley_fine_tuned
-    gc.collect()
-    torch.cuda.empty_cache()
+
 
 def save_audio(response, file_name):
     # Writing the audio stream to the file

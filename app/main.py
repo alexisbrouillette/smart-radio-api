@@ -1,14 +1,10 @@
-
-
+import asyncio
 from fastapi import FastAPI, Body, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-
 from fastapi.responses import FileResponse
 import httpx
 from pydantic import BaseModel
-
 from typing import List
-
 from TTS.api import TTS
 from functions.classes import Track
 from functions.audio_gen import get_audio
@@ -16,13 +12,18 @@ from functions.text_gen import generate_prompt, generate_text_for_song, get_llm
 import threading
 import queue
 from functools import wraps
+import os
+import torch
+import gc
+from concurrent.futures import ThreadPoolExecutor
+import uuid
 
-import ssl
+# Set before importing TTS
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # Synchronous CUDA ops
+torch.backends.cudnn.benchmark = False    # Deterministic behavior
+torch.backends.cudnn.deterministic = True
 
 app = FastAPI()
-
-ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ssl_context.load_cert_chain('app/cert.pem', keyfile='app/key.pem')
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,105 +36,82 @@ app.add_middleware(
 llm = get_llm()
 
 tts_stanley_fine_tuned = TTS(
-    model_path="./functions/xtts_fine-tuned", 
-    config_path="./functions/xtts_fine-tuned/config.json",
+    model_path="./functions/xtts_fine_tuned_2", 
+    config_path="./functions/xtts_fine_tuned_2/config.json",
     gpu=True)
 
+# Create a queue for GPU tasks and a single-threaded executor
+app.gpu_queue = asyncio.Queue()
+app.gpu_executor = ThreadPoolExecutor(max_workers=1)  # Single thread for GPU operations
 
-# Create a queue and a lock for thread-safe operations
-request_queue = queue.Queue()
-processing_lock = threading.Lock()
+class GPUTask:
+    def __init__(self, text_for_audio: str):
+        self.text_for_audio = text_for_audio
+        self.task_id = str(uuid.uuid4())
+        self.result_file = f"output_{self.task_id}.wav"
+        self.completion_event = asyncio.Event()
+        self.error = None
 
-def process_queue():
-    """Process items from the queue one at a time."""
+async def gpu_worker():
+    """Worker that processes GPU tasks one at a time"""
+    print("Starting GPU Worker")
     while True:
-        # Get the next request (this blocks until one is available)
-        item = request_queue.get()
-        func, args, kwargs, future = item
+        task = await app.gpu_queue.get()
+        print(f"Processing GPU task: {task.task_id} (queue size: {app.gpu_queue.qsize()})")
         
+        loop = asyncio.get_event_loop()
         try:
-            # Process the request
-            with processing_lock:
-                result = func(*args, **kwargs)
-            future.set_result(result)
+            # Execute the synchronous GPU function in our single-threaded executor
+            await loop.run_in_executor(
+                app.gpu_executor, 
+                execute_gpu_task, 
+                task.text_for_audio, 
+                task.result_file
+            )
+            print(f"GPU task {task.task_id} completed successfully")
         except Exception as e:
-            future.set_exception(e)
+            print(f"GPU task {task.task_id} failed: {e}")
+            task.error = e
         finally:
-            # Mark the task as done
-            request_queue.task_done()
+            task.completion_event.set()  # Signal completion
+            app.gpu_queue.task_done()
 
-# Start the queue processing thread
-queue_thread = threading.Thread(target=process_queue, daemon=True)
-queue_thread.start()
-
-def queue_request(func):
-    """Decorator to add API functions to the processing queue."""
-    @wraps(func)
-    def wrapped(*args, **kwargs):
-        # Create a future to hold the result
-        future = FutureResult()
+def execute_gpu_task(text_for_audio: str, output_file: str):
+    """Synchronous function that runs the actual GPU operation"""
+    try:
+        print(f"Executing GPU task for text: {text_for_audio[:50]}...")
         
-        # Put the request in the queue
-        request_queue.put((func, args, kwargs, future))
+        # Call your synchronous get_audio function
+        get_audio(text_for_audio, tts_stanley_fine_tuned, output_file)
         
-        # Return the future's result (will block until processed)
-        return future.get_result()
-    return wrapped
+        # Clean up GPU memory after each task
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        return output_file
+    except Exception as e:
+        print(f"Error in GPU task execution: {e}")
+        raise
 
-class FutureResult:
-    """Simple future implementation to get async results."""
-    def __init__(self):
-        self._result = None
-        self._exception = None
-        self._event = threading.Event()
-
-    def set_result(self, result):
-        self._result = result
-        self._event.set()
-
-    def set_exception(self, exception):
-        self._exception = exception
-        self._event.set()
-
-    def get_result(self):
-        self._event.wait()
-        if self._exception:
-            raise self._exception
-        return self._result
-
+@app.on_event("startup")
+async def start_workers():
+    asyncio.create_task(gpu_worker())
 
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
 
-
 @app.get("/radio")
 def generate_radio():
     return {"Hello": "World111"}
 
-
-
-@queue_request
 @app.post("/get_radio_text")
 def get_queue_radio(queue: List[Track]):
     print("coucou!")
-    # queue = [queue[0]] # for now, just get the first track
     print("Queue: ", queue)
-    #prompts = [generate_prompt(song_infos) for song_infos in queue]
-    #songs_texts = [generate_text_for_song( prompt, llm) for prompt in prompts]
     songs_texts = generate_text_for_song(queue, llm) 
     print("Generated text: ", songs_texts)
-    # audios = []
-    # for i, song_text in enumerate(songs_texts):
-    #     response = get_audio(song_text)
-    #     audios.append(response)
-    #     save_audio(response, f"{i}.mp3")
-    # print("Saved audio files: ")
-    # print(audios)
 
-    #final_queue = []
-    #for i, track in enumerate(queue):
-        # if i%3 == 0:
     lastTrack = queue[-1]
     radio = {
         "beforeTrackId": lastTrack.id,
@@ -141,22 +119,46 @@ def get_queue_radio(queue: List[Track]):
         "text": songs_texts,
         "audio": "empty",
     }
-    #final_queue.append(radio)
 
     return radio
 
-@queue_request
 @app.post("/get_radio_audio")
-def generate_audio_from_text(textForAudio: str = Body(...)):
+async def generate_audio_from_text(textForAudio: str = Body(...)):
+    """Generate audio using GPU queue with proper async coordination"""
     try:
-        print("Genereting audio")
-        print(textForAudio)
-        get_audio(textForAudio, tts_stanley_fine_tuned)#generates the audio in output.wav
-
-
-        #save_audio(response, "output.wav")
-        headers = {'Content-Disposition': f'attachment; filename="{f"output.wav"}"'}
-        return FileResponse(f"./output.wav", headers=headers, media_type="audio/wav")
+        # Create a task with completion event
+        task = GPUTask(textForAudio)
+        
+        # Add to queue
+        await app.gpu_queue.put(task)
+        print(f"Queued GPU task: {task.task_id}")
+        
+        # Wait for completion event with timeout (5 minutes)
+        try:
+            await asyncio.wait_for(task.completion_event.wait(), timeout=300.0)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=408, detail="Audio generation timed out")
+        
+        # Check for errors
+        if task.error:
+            raise HTTPException(status_code=500, detail=f"Audio generation failed: {task.error}")
+        
+        # Return the generated file
+        if os.path.exists(task.result_file):
+            headers = {'Content-Disposition': f'attachment; filename="{task.result_file}"'}
+            
+            # Optional: Clean up file after response (you might want to keep this for debugging)
+            # @app.on_event("shutdown")
+            # async def cleanup():
+            #     if os.path.exists(task.result_file):
+            #         os.remove(task.result_file)
+            
+            return FileResponse(task.result_file, headers=headers, media_type="audio/wav")
+        else:
+            raise HTTPException(status_code=500, detail="Generated audio file not found")
+        
+    except HTTPException:
+        raise
     except Exception as e:
         print("Error generating audio: ", e)
         raise HTTPException(status_code=500, detail="Error generating audio")

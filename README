@@ -1,0 +1,5 @@
+cd C:\Users\Admin\.virtualenvs\smart-radio-api-_zZIQMh0
+Scripts\activate
+cd C:\Users\Admin\Documents\projets\smartRadio\smart-radio-api
+python server.py
+ngrok http https://localhost:8000 --domain wondrous-humbly-bat.ngrok-free.app          

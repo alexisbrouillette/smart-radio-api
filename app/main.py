@@ -444,6 +444,54 @@ async def stream_live_url(query: str, ffmpeg_bin: str, request: Request):
     except Exception as e:
         print(f"[STREAM LIVE FALLBACK ERROR] {e}")
 
+@app.get("/stream/duration")
+async def get_stream_duration(track: str = Query(...), hostText: str = Query(None)):
+    from pydub import AudioSegment
+    speech_duration_sec = 0.0
+    if hostText and hostText.strip():
+        speech_text = hostText.strip()
+        task = GPUTask(speech_text)
+        await app.gpu_queue.put(task)
+        try:
+            await asyncio.wait_for(task.completion_event.wait(), timeout=15.0)
+            if os.path.exists(task.result_file):
+                seg = AudioSegment.from_file(task.result_file)
+                speech_duration_sec = len(seg) / 1000.0
+        except Exception:
+            speech_duration_sec = 8.0
+            
+    cached_file = get_cache_filepath(track)
+    song_duration_sec = 0.0
+    if os.path.exists(cached_file) and os.path.getsize(cached_file) > 50000:
+        try:
+            seg = AudioSegment.from_file(cached_file)
+            song_duration_sec = len(seg) / 1000.0
+        except Exception:
+            song_duration_sec = 0.0
+
+    return {
+        "track": track,
+        "speech_duration_sec": speech_duration_sec,
+        "song_duration_sec": song_duration_sec,
+        "total_segment_sec": speech_duration_sec + song_duration_sec
+    }
+
+@app.get("/cache/status")
+async def check_cache_status(tracks: str = Query("")):
+    """Returns a list of tracks that are 100% cached on disk."""
+    if not tracks:
+        return {"cached_tracks": []}
+    
+    track_list = [t.strip() for t in tracks.split(",") if t.strip()]
+    cached_tracks = []
+    
+    for trk in track_list:
+        cached_file = get_cache_filepath(trk)
+        if os.path.exists(cached_file) and os.path.getsize(cached_file) > 100000:
+            cached_tracks.append(trk)
+            
+    return {"cached_tracks": cached_tracks}
+
 @app.get("/stream/live.mp3")
 async def stream_live(request: Request, track: str = Query(...), nextTrack: str = Query(None), thirdTrack: str = Query(None), hostText: str = Query(None)):
     from fastapi.responses import StreamingResponse

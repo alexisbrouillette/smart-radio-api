@@ -610,6 +610,20 @@ def fastapi_app():
         except Exception as e:
             print(f"[MODAL PRE-DOWNLOAD ERROR] Failed to cache '{query}': {e}")
         return None
+    @fast_app.get("/cache/status")
+    async def check_cache_status(tracks: str = Query("")):
+        if not tracks:
+            return {"cached_tracks": []}
+        
+        track_list = [t.strip() for t in tracks.split(",") if t.strip()]
+        cached_tracks = []
+        
+        for trk in track_list:
+            cached_file = get_modal_cache_filepath(trk)
+            if os.path.exists(cached_file) and os.path.getsize(cached_file) > 100000:
+                cached_tracks.append(trk)
+                
+        return {"cached_tracks": cached_tracks}
 
     @fast_app.get("/stream/live.mp3")
     async def stream_live_radio(request: Request, track: str = "Cheikh Lo Sante Yalla", nextTrack: str = None, thirdTrack: str = None, hostText: str = None):

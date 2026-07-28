@@ -5,3 +5,7 @@ TTS/
 training_resampled/
 training/
 GPT-SoVITS-main/
+.venv
+.env
+*.wav
+*.mp3

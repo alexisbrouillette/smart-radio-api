@@ -64,7 +64,7 @@ AUDIO_DIR = "/audio"
     # Switch to gpu="t4" if you want faster TTS
     cpu=2,
     memory=4096,
-    timeout=300,
+    timeout=900,
     secrets=secrets,
     volumes={AUDIO_DIR: volume},
     # Keep 1 warm container to avoid cold-start delays mid-music
@@ -741,8 +741,8 @@ def fastapi_app():
             task = tts_task_ref["task"]
             if task:
                 try:
-                    print(f"[MODAL STREAM] Waiting max 2.0s for host speech intro...")
-                    await asyncio.wait_for(task.event.wait(), timeout=2.0)
+                    print(f"[MODAL STREAM] Waiting max 30s for host speech intro...")
+                    await asyncio.wait_for(task.event.wait(), timeout=30.0)
                     if os.path.exists(task.result_file):
                         print(f"[MODAL STREAM] Streaming host speech intro...")
                         async for chunk in stream_file_path(task.result_file):

@@ -610,6 +610,39 @@ def fastapi_app():
         except Exception as e:
             print(f"[MODAL PRE-DOWNLOAD ERROR] Failed to cache '{query}': {e}")
         return None
+
+    @fast_app.get("/stream/duration")
+    async def get_stream_duration(track: str = Query(...), hostText: str = Query(None)):
+        from pydub import AudioSegment
+        speech_duration_sec = 0.0
+        if hostText and hostText.strip():
+            speech_text = hostText.strip()
+            task = GPUTask(speech_text)
+            await tts_queue.put(task)
+            try:
+                await asyncio.wait_for(task.event.wait(), timeout=15.0)
+                if os.path.exists(task.result_file):
+                    seg = AudioSegment.from_file(task.result_file)
+                    speech_duration_sec = len(seg) / 1000.0
+            except Exception:
+                speech_duration_sec = 8.0
+                
+        cached_file = get_modal_cache_filepath(track)
+        song_duration_sec = 0.0
+        if os.path.exists(cached_file) and os.path.getsize(cached_file) > 50000:
+            try:
+                seg = AudioSegment.from_file(cached_file)
+                song_duration_sec = len(seg) / 1000.0
+            except Exception:
+                song_duration_sec = 0.0
+
+        return {
+            "track": track,
+            "speech_duration_sec": speech_duration_sec,
+            "song_duration_sec": song_duration_sec,
+            "total_segment_sec": speech_duration_sec + song_duration_sec
+        }
+
     @fast_app.get("/cache/status")
     async def check_cache_status(tracks: str = Query("")):
         if not tracks:

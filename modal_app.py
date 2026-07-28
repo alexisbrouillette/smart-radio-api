@@ -83,7 +83,7 @@ def fastapi_app():
 
     import numpy as np
     import soundfile as sf
-    from fastapi import FastAPI, Body, HTTPException, Header, Request
+    from fastapi import FastAPI, Body, HTTPException, Header, Request, Query
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse
     import httpx

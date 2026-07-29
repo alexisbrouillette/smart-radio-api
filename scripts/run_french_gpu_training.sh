@@ -6,10 +6,21 @@ set -e
 
 echo "=== 🎙️ FRENCH KOKORO TTS FINE-TUNING PIPELINE ==="
 
-# 1. Environment & Dependencies Check
-echo "[1/4] Checking dependencies..."
+# 0. Auto-activate .venv if present
+if [ -f ".venv/bin/activate" ]; then
+    echo "[ENV] Activating virtual environment (.venv)..."
+    source .venv/bin/activate
+fi
+
+# 1. Environment & Submodule Check
+echo "[1/4] Checking submodules & dependencies..."
+if [ ! -d "kikiri-tts/StyleTTS2" ] || [ ! -f "kikiri-tts/StyleTTS2/train_first.py" ]; then
+    echo "[SUBMODULE] Initializing kikiri-tts submodules..."
+    git submodule update --init --recursive
+fi
+
 if ! command -v espeak-ng &> /dev/null; then
-    echo "⚠️ WARNING: espeak-ng is not installed. Run 'sudo apt-get install espeak-ng libsndfile1'"
+    echo "⚠️ WARNING: espeak-ng is not installed. Run 'sudo apt-get install espeak-ng libsndfile1' or 'conda install -c conda-forge espeak-ng'"
 fi
 
 # 2. Build Monotonic Alignment Extension inside kikiri-tts/StyleTTS2

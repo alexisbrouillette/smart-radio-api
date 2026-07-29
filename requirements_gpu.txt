@@ -1,0 +1,27 @@
+# All-in-One GPU Requirements for French Kokoro TTS Fine-Tuning Pipeline
+torch
+torchaudio
+torchvision
+accelerate
+transformers
+librosa
+soundfile
+pyyaml
+tensorboard
+munch
+phonemizer
+misaki[fr]
+openai-whisper
+pydub
+scipy
+static_ffmpeg
+Cython
+einops
+einops-exts
+numba
+nltk
+matplotlib
+tqdm
+pandas
+huggingface-hub
+git+https://github.com/resemble-ai/monotonic_align.git

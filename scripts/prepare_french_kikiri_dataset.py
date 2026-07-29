@@ -110,8 +110,9 @@ def preprocess_french_dataset(audio_dir: str, output_dir: str, sample_limit: int
                 phonemes, _ = g2p(text)
                 phonemes = phonemes.strip()
 
+                rel_wav_path = os.path.join("dataset_french", "wavs", f"{chunk_id}.wav")
                 manifest_entries.append({
-                    "wav_path": out_wav_path,
+                    "wav_path": rel_wav_path,
                     "text": text,
                     "phonemes": phonemes,
                     "speaker": "0"

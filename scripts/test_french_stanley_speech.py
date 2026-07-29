@@ -17,7 +17,7 @@ if str(KIKIRI_DIR) not in sys.path:
 
 def test_stanley_french_speech(
     checkpoint_path: str = "kikiri-tts/StyleTTS2/logs/kokoro-french-stanley/epoch_00009.pth",
-    text_to_speak: str = "Bonjour! Vous écoutez Smart Radio avec la voix de Stanley. Bienvenue à tous nos auditeurs!",
+    text_to_speak: str = "Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!",
     output_path: str = "test_output/stanley_french_sample.wav"
 ):
     print("=== 🎙️ TESTING FRENCH KOKORO TTS (STANLEY VOICE) ===")

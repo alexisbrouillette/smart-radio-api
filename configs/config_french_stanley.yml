@@ -15,7 +15,7 @@ log_dir: "logs/kokoro-french-stanley"
 data_params:
   train_data: "../../dataset_french/train_list.txt"
   val_data: "../../dataset_french/val_list.txt"
-  root_path: "../../dataset_french/wavs"
+  root_path: "../../"
   OOD_data: "../../dataset_french/train_list.txt"
   min_length: 10
   num_workers: 4

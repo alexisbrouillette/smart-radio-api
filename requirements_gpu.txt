@@ -24,4 +24,5 @@ matplotlib
 tqdm
 pandas
 huggingface-hub
+loguru
 git+https://github.com/resemble-ai/monotonic_align.git

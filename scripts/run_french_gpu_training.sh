@@ -27,6 +27,10 @@ fi
 echo "[2/4] Building and installing monotonic alignment module..."
 python -c "import monotonic_align" 2>/dev/null || pip install git+https://github.com/resemble-ai/monotonic_align.git
 
+# Copy config into kikiri-tts/configs/ if needed
+mkdir -p kikiri-tts/configs
+cp configs/config_french_stanley.yml kikiri-tts/configs/config_french_stanley.yml
+
 cd kikiri-tts/StyleTTS2
 
 # 3. Stage 1 Training: Acoustic Model Fine-Tuning

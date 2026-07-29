@@ -26,7 +26,7 @@ pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # 4. Fine-Tuning & Kokoro Dependencies
 echo "[4/4] Installing fine-tuning packages (accelerate, misaki, whisper, StyleTTS2 requirements)..."
-pip install accelerate transformers librosa soundfile pyyaml tensorboard munch phonemizer misaki openai-whisper pydub scipy static_ffmpeg Cython
+pip install accelerate transformers librosa soundfile pyyaml tensorboard munch phonemizer misaki openai-whisper pydub scipy static_ffmpeg Cython einops numba
 
 echo "\n=== ✅ GPU ENVIRONMENT SETUP COMPLETE! ==="
 echo "Next steps:"

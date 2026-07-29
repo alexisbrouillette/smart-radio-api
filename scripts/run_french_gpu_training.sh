@@ -23,17 +23,11 @@ if ! command -v espeak-ng &> /dev/null; then
     echo "⚠️ WARNING: espeak-ng is not installed. Run 'sudo apt-get install espeak-ng libsndfile1' or 'conda install -c conda-forge espeak-ng'"
 fi
 
-# 2. Build Monotonic Alignment Extension inside kikiri-tts/StyleTTS2
-echo "[2/4] Building monotonic alignment module..."
+# 2. Build & Install Monotonic Alignment Extension
+echo "[2/4] Building and installing monotonic alignment module..."
+python -c "import monotonic_align" 2>/dev/null || pip install git+https://github.com/resemble-ai/monotonic_align.git
+
 cd kikiri-tts/StyleTTS2
-if [ ! -d "monotonic_align/build" ]; then
-    if [ ! -d "monotonic_align" ]; then
-        git clone https://github.com/resemble-ai/monotonic_align.git
-    fi
-    cd monotonic_align
-    python setup.py build_ext --inplace
-    cd ..
-fi
 
 # 3. Stage 1 Training: Acoustic Model Fine-Tuning
 echo "\n[3/4] Launching Stage 1 Fine-Tuning (Acoustic Model)..."

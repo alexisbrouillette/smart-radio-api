@@ -1,0 +1,3 @@
+[submodule "kikiri-tts"]
+	path = kikiri-tts
+	url = https://github.com/semidark/kikiri-tts.git

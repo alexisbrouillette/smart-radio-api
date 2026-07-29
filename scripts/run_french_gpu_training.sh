@@ -15,8 +15,8 @@ fi
 # 1. Environment & Submodule Check
 echo "[1/4] Checking submodules & dependencies..."
 if [ ! -d "kikiri-tts/StyleTTS2" ] || [ ! -f "kikiri-tts/StyleTTS2/train_first.py" ]; then
-    echo "[SUBMODULE] Initializing kikiri-tts submodules..."
-    git submodule update --init --recursive
+    echo "[SUBMODULE] Fast cloning kikiri-tts submodules (--depth 1)..."
+    git submodule update --init --recursive --depth 1
 fi
 
 if ! command -v espeak-ng &> /dev/null; then

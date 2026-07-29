@@ -114,7 +114,7 @@ def preprocess_french_dataset(audio_dir: str, output_dir: str, sample_limit: int
                     "wav_path": out_wav_path,
                     "text": text,
                     "phonemes": phonemes,
-                    "speaker": "stanley"
+                    "speaker": "0"
                 })
 
                 print(f"  └ Segment {chunk_id} ({len(chunk_audio)/1000.0:.1f}s): \"{text[:60]}\" -> [{phonemes[:60]}]")
@@ -139,11 +139,11 @@ def preprocess_french_dataset(audio_dir: str, output_dir: str, sample_limit: int
 
     with open(train_txt_path, "w", encoding="utf-8") as f:
         for e in train_entries:
-            f.write(f"{e['wav_path']}|{e['phonemes']}|{e['speaker']}\n")
+            f.write(f"{e['wav_path']}|{e['phonemes']}|0\n")
 
     with open(val_txt_path, "w", encoding="utf-8") as f:
         for e in val_entries:
-            f.write(f"{e['wav_path']}|{e['phonemes']}|{e['speaker']}\n")
+            f.write(f"{e['wav_path']}|{e['phonemes']}|0\n")
 
     print(f"Saved {len(train_entries)} train samples -> {train_txt_path}")
     print(f"Saved {len(val_entries)} val samples -> {val_txt_path}")

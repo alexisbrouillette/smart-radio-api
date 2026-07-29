@@ -12,6 +12,7 @@ import threading
 import queue
 from functools import wraps
 import os
+import re
 
 # Manual parser for .env file to load GEMINI_API_KEY without requiring python-dotenv
 if os.path.exists(".env"):
@@ -45,11 +46,33 @@ llm = get_llm()
 app.gpu_queue = asyncio.Queue()
 app.gpu_executor = ThreadPoolExecutor(max_workers=1)  # Process one TTS request at a time to keep CPU usage controlled
 
+TTS_CACHE_DIR = "/tmp/smart_radio_tts_cache"
+os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+
+# Tracks which TTS texts are currently being synthesized to avoid duplicate work
+_tts_in_progress: dict = {}
+
+# pending_speech[trackKey] = hostText: speech to inject before a specific track
+# Frontend schedules this when a radio item is generated; server injects it at stream time
+pending_speech: dict = {}
+
+def normalize_key(s: str) -> str:
+    if not s:
+        return ""
+    import re
+    return re.sub(r'[^\w]', '', s.lower())
+
+def get_tts_cache_path(text: str) -> str:
+    import hashlib
+    h = hashlib.md5(text.strip().lower().encode('utf-8')).hexdigest()
+    return os.path.join(TTS_CACHE_DIR, f"tts_{h}.mp3")
+
 class GPUTask:
     def __init__(self, text_for_audio: str):
         self.text_for_audio = text_for_audio
         self.task_id = str(uuid.uuid4())
-        self.result_file = f"output_{self.task_id}.mp3"
+        # Use stable cache path based on text content
+        self.result_file = get_tts_cache_path(text_for_audio)
         self.completion_event = asyncio.Event()
         self.error = None
 
@@ -60,9 +83,17 @@ async def gpu_worker():
         task = await app.gpu_queue.get()
         print(f"Processing TTS task: {task.task_id} (queue size: {app.gpu_queue.qsize()})")
         
+        # Skip synthesis if already cached on disk
+        if os.path.exists(task.result_file) and os.path.getsize(task.result_file) > 1000:
+            print(f"[TTS CACHE HIT] Reusing cached TTS for task {task.task_id}")
+            task.completion_event.set()
+            app.gpu_queue.task_done()
+            # Clean up in-progress tracker
+            _tts_in_progress.pop(task.result_file, None)
+            continue
+        
         loop = asyncio.get_event_loop()
         try:
-            # Execute the synchronous function in our executor
             await loop.run_in_executor(
                 app.gpu_executor, 
                 execute_gpu_task, 
@@ -74,8 +105,9 @@ async def gpu_worker():
             print(f"TTS task {task.task_id} failed: {e}")
             task.error = e
         finally:
-            task.completion_event.set()  # Signal completion
+            task.completion_event.set()
             app.gpu_queue.task_done()
+            _tts_in_progress.pop(task.result_file, None)
 
 def execute_gpu_task(text_for_audio: str, output_file: str):
     """Synchronous function that runs the actual Kokoro CPU operation and converts to MP3"""
@@ -350,10 +382,14 @@ async def get_spotify_queue(authorization: str = Header(...)):
 CACHE_DIR = "/tmp/smart_radio_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-def get_cache_filepath(query: str) -> str:
+def get_cache_filepath(query: str, track_id: str = None) -> str:
+    if track_id and track_id.strip():
+        clean_id = re.sub(r'[^\w]', '', track_id.strip())
+        return os.path.join(CACHE_DIR, f"track_{clean_id}.mp3")
     import hashlib
-    h = hashlib.md5(query.strip().lower().encode('utf-8')).hexdigest()
-    return os.path.join(CACHE_DIR, f"{h}.mp3")
+    norm = normalize_key(query)
+    h = hashlib.md5(norm.encode('utf-8')).hexdigest()
+    return os.path.join(CACHE_DIR, f"track_{h}.mp3")
 
 @app.post("/cache/check")
 async def check_cache_status(queries: list[str] = Body(...)):
@@ -364,22 +400,49 @@ async def check_cache_status(queries: list[str] = Body(...)):
         results[query] = is_cached
     return {"cached": results}
 
-async def pre_download_track(query: str, ffmpeg_bin: str) -> str:
+@app.get("/proxy/download")
+async def proxy_download_track(track: str = Query(...), trackId: str = Query(None)):
+    """Download a track via local yt-dlp and return the MP3 file."""
+    import static_ffmpeg
+    from fastapi.responses import Response
+    
+    ffmpeg_bin, _ = static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()
+    
+    filepath = get_cache_filepath(track, trackId)
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 50000:
+        print(f"[PROXY] Cache hit for '{track}' (ID: {trackId}) -> {filepath}")
+        with open(filepath, "rb") as f:
+            return Response(content=f.read(), media_type="audio/mpeg")
+    
+    print(f"[PROXY] Downloading '{track}' for remote Modal server...")
+    await pre_download_track(track, ffmpeg_bin, trackId)
+    
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 50000:
+        print(f"[PROXY] Success, serving {os.path.getsize(filepath) / 1024:.1f} KB for '{track}'")
+        with open(filepath, "rb") as f:
+            return Response(content=f.read(), media_type="audio/mpeg")
+    
+    raise HTTPException(status_code=404, detail=f"Could not download track: {track}")
+
+def _resolve_yt_url_sync(query: str) -> str:
+    import yt_dlp
+    ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'no_warnings': True, 'default_search': 'ytsearch1'}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(query, download=False)
+        return info['entries'][0]['url'] if 'entries' in info else info['url']
+
+async def pre_download_track(query: str, ffmpeg_bin: str, track_id: str = None) -> str:
     if not query or not query.strip():
         return None
     
-    filepath = get_cache_filepath(query)
+    filepath = get_cache_filepath(query, track_id)
     if os.path.exists(filepath) and os.path.getsize(filepath) > 50000:
-        print(f"[LOCAL CACHE HIT] Track '{query}' is already cached on disk -> {filepath}")
+        print(f"[LOCAL CACHE HIT] Track '{query}' (ID: {track_id}) is cached -> {filepath}")
         return filepath
 
-    import yt_dlp
-    print(f"[LOCAL PRE-DOWNLOAD] Downloading track to disk cache: '{query}'...")
+    print(f"[LOCAL PRE-DOWNLOAD] Downloading track to disk cache: '{query}' (ID: {track_id})...")
     try:
-        ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'no_warnings': True, 'default_search': 'ytsearch1'}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=False)
-            resolved_url = info['entries'][0]['url'] if 'entries' in info else info['url']
+        resolved_url = await asyncio.to_thread(_resolve_yt_url_sync, query)
         
         cmd = [
             ffmpeg_bin,
@@ -402,16 +465,42 @@ async def pre_download_track(query: str, ffmpeg_bin: str) -> str:
             print(f"[LOCAL PRE-DOWNLOAD SUCCESS] Cached '{query}' ({os.path.getsize(filepath) / 1024:.1f} KB) -> {filepath}")
             return filepath
     except Exception as e:
-        print(f"[LOCAL PRE-DOWNLOAD ERROR] Failed to cache '{query}': {e}")
+        import traceback
+        print(f"[LOCAL PRE-DOWNLOAD ERROR] Failed to cache '{query}': {e}\n{traceback.format_exc()}")
+    return None
+
+    print(f"[LOCAL PRE-DOWNLOAD] Downloading track to disk cache: '{query}'...")
+    try:
+        resolved_url = await asyncio.to_thread(_resolve_yt_url_sync, query)
+        
+        cmd = [
+            ffmpeg_bin,
+            '-y',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '-i', resolved_url,
+            '-vn',
+            '-acodec', 'libmp3lame',
+            '-b:a', '128k',
+            '-ar', '44100',
+            '-ac', '2',
+            filepath
+        ]
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await proc.wait()
+        if os.path.exists(filepath) and os.path.getsize(filepath) > 50000:
+            print(f"[LOCAL PRE-DOWNLOAD SUCCESS] Cached '{query}' ({os.path.getsize(filepath) / 1024:.1f} KB) -> {filepath}")
+            return filepath
+    except Exception as e:
+        import traceback
+        print(f"[LOCAL PRE-DOWNLOAD ERROR] Failed to cache '{query}': {e}\n{traceback.format_exc()}")
     return None
 
 async def stream_live_url(query: str, ffmpeg_bin: str, request: Request):
-    import yt_dlp
     try:
-        ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'no_warnings': True, 'default_search': 'ytsearch1'}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=False)
-            resolved_url = info['entries'][0]['url'] if 'entries' in info else info['url']
+        resolved_url = await asyncio.to_thread(_resolve_yt_url_sync, query)
 
         cmd = [
             ffmpeg_bin,
@@ -444,21 +533,84 @@ async def stream_live_url(query: str, ffmpeg_bin: str, request: Request):
     except Exception as e:
         print(f"[STREAM LIVE FALLBACK ERROR] {e}")
 
+@app.post("/tts/schedule")
+async def schedule_tts_for_track(trackKey: str = Body(...), hostText: str = Body(...), trackId: str = Body(None)):
+    """Schedule host speech to be injected before a specific track in the stream."""
+    if not hostText or not hostText.strip():
+        return {"status": "skipped"}
+
+    text_clean = hostText.strip()
+    # Save under both normalized trackKey and trackId if provided
+    if trackKey:
+        norm_title_key = normalize_key(trackKey)
+        pending_speech[norm_title_key] = text_clean
+        print(f"[TTS SCHEDULE] Scheduled speech for title key '{norm_title_key}': '{text_clean[:40]}...'")
+    
+    if trackId:
+        norm_id_key = normalize_key(trackId)
+        pending_speech[norm_id_key] = text_clean
+        print(f"[TTS SCHEDULE] Scheduled speech for ID key '{norm_id_key}': '{text_clean[:40]}...'")
+
+    # Kick off TTS pre-synthesis
+    cache_path = get_tts_cache_path(text_clean)
+    if not (os.path.exists(cache_path) and os.path.getsize(cache_path) > 1000):
+        if cache_path not in _tts_in_progress:
+            _tts_in_progress[cache_path] = True
+            task = GPUTask(text_clean)
+            await app.gpu_queue.put(task)
+
+    return {"status": "scheduled", "trackKey": trackKey, "trackId": trackId}
+
+@app.post("/tts/prewarm")
+async def prewarm_tts(hostText: str = Body(...)):
+    """Pre-synthesize TTS speech into the text-based cache so it's instant when the stream needs it."""
+    if not hostText or not hostText.strip():
+        return {"status": "skipped", "reason": "empty text"}
+    
+    cache_path = get_tts_cache_path(hostText.strip())
+    
+    # Already cached — instant response
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1000:
+        print(f"[TTS PREWARM] Already cached: '{hostText[:50]}...'")
+        return {"status": "cached", "path": cache_path}
+    
+    # Deduplicate: if already being synthesized, skip
+    if cache_path in _tts_in_progress:
+        print(f"[TTS PREWARM] Already in progress: '{hostText[:50]}...'")
+        return {"status": "in_progress"}
+    
+    print(f"[TTS PREWARM] Queuing synthesis for: '{hostText[:60]}...'")
+    _tts_in_progress[cache_path] = True
+    task = GPUTask(hostText.strip())
+    await app.gpu_queue.put(task)
+    # Don't wait — fire and forget so the frontend isn't blocked
+    return {"status": "queued", "task_id": task.task_id}
+
 @app.get("/stream/duration")
 async def get_stream_duration(track: str = Query(...), hostText: str = Query(None)):
     from pydub import AudioSegment
     speech_duration_sec = 0.0
     if hostText and hostText.strip():
-        speech_text = hostText.strip()
-        task = GPUTask(speech_text)
-        await app.gpu_queue.put(task)
-        try:
-            await asyncio.wait_for(task.completion_event.wait(), timeout=15.0)
-            if os.path.exists(task.result_file):
-                seg = AudioSegment.from_file(task.result_file)
+        cache_path = get_tts_cache_path(hostText.strip())
+        # Use cached TTS if available, otherwise synthesize
+        if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1000:
+            print(f"[TTS CACHE HIT] Using cached TTS for duration calc")
+            try:
+                seg = AudioSegment.from_file(cache_path)
                 speech_duration_sec = len(seg) / 1000.0
-        except Exception:
-            speech_duration_sec = 8.0
+            except Exception:
+                speech_duration_sec = 8.0
+        else:
+            speech_text = hostText.strip()
+            task = GPUTask(speech_text)
+            await app.gpu_queue.put(task)
+            try:
+                await asyncio.wait_for(task.completion_event.wait(), timeout=15.0)
+                if os.path.exists(task.result_file):
+                    seg = AudioSegment.from_file(task.result_file)
+                    speech_duration_sec = len(seg) / 1000.0
+            except Exception:
+                speech_duration_sec = 8.0
             
     cached_file = get_cache_filepath(track)
     song_duration_sec = 0.0
@@ -477,51 +629,63 @@ async def get_stream_duration(track: str = Query(...), hostText: str = Query(Non
     }
 
 @app.get("/cache/status")
-async def check_cache_status(tracks: str = Query("")):
+async def check_cache_status(tracks: str = Query(""), trackIds: str = Query("")):
     """Returns a list of tracks that are 100% cached on disk."""
     if not tracks:
         return {"cached_tracks": []}
     
-    track_list = [t.strip() for t in tracks.split(",") if t.strip()]
+    delim = "|||" if "|||" in tracks else ","
+    track_list = [t.strip() for t in tracks.split(delim) if t.strip()]
+    
+    track_ids_list = []
+    if trackIds and trackIds.strip():
+        delim_id = "|||" if "|||" in trackIds else ","
+        track_ids_list = [i.strip() for i in trackIds.split(delim_id) if i.strip()]
+
     cached_tracks = []
     
-    for trk in track_list:
-        cached_file = get_cache_filepath(trk)
-        if os.path.exists(cached_file) and os.path.getsize(cached_file) > 100000:
+    for idx, trk in enumerate(track_list):
+        trk_id = track_ids_list[idx] if idx < len(track_ids_list) else None
+        cached_file_id = get_cache_filepath(trk, trk_id) if trk_id else None
+        cached_file_title = get_cache_filepath(trk, None)
+
+        is_cached = False
+        if cached_file_id and os.path.exists(cached_file_id) and os.path.getsize(cached_file_id) > 100000:
+            is_cached = True
+        elif os.path.exists(cached_file_title) and os.path.getsize(cached_file_title) > 100000:
+            is_cached = True
+
+        if is_cached:
             cached_tracks.append(trk)
             
     return {"cached_tracks": cached_tracks}
 
 @app.get("/stream/live.mp3")
-async def stream_live(request: Request, track: str = Query(...), nextTrack: str = Query(None), thirdTrack: str = Query(None), hostText: str = Query(None)):
+async def stream_live(request: Request, tracks: str = Query(None), trackIds: str = Query(None), track: str = Query(None), nextTrack: str = Query(None), thirdTrack: str = Query(None), hostText: str = Query(None)):
     from fastapi.responses import StreamingResponse
     import static_ffmpeg
     
-    print(f"\n[LOCAL API STREAM] 📻 Incoming Request -> Track: '{track}' | Next: '{nextTrack}' | HostText: '{hostText[:40] if hostText else None}'")
+    # Support ||| delimiter to avoid splitting artist names with commas (e.g., "Crosby, Stills & Nash")
+    track_list = []
+    track_ids_list = []
+    if tracks and tracks.strip():
+        delim = "|||" if "|||" in tracks else ","
+        track_list = [t.strip() for t in tracks.split(delim) if t.strip()]
+    elif track and track.strip():
+        track_list.append(track.strip())
+        if nextTrack and nextTrack.strip():
+            track_list.append(nextTrack.strip())
+        if thirdTrack and thirdTrack.strip():
+            track_list.append(thirdTrack.strip())
+
+    if trackIds and trackIds.strip():
+        delim_id = "|||" if "|||" in trackIds else ","
+        track_ids_list = [i.strip() for i in trackIds.split(delim_id) if i.strip()]
+
+    print(f"\n[LOCAL API STREAM] 📻 Continuous Broadcast Requested for {len(track_list)} tracks (IDs: {len(track_ids_list)})")
     ffmpeg_bin, _ = static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()
 
     async def generate_chunks():
-        tts_task_ref = {"task": None}
-
-        async def start_bg_tasks():
-            # 1. Background pre-download upcoming 3 tracks to disk in parallel!
-            asyncio.create_task(pre_download_track(track, ffmpeg_bin))
-            if nextTrack and nextTrack.strip():
-                asyncio.create_task(pre_download_track(nextTrack, ffmpeg_bin))
-            if thirdTrack and thirdTrack.strip():
-                asyncio.create_task(pre_download_track(thirdTrack, ffmpeg_bin))
-
-            # 2. Background synthesize DJ host speech
-            speech_text = hostText
-            if speech_text and speech_text.strip():
-                try:
-                    print(f"[LOCAL API STREAM] Synthesizing background TTS: '{speech_text[:60]}...'")
-                    task = GPUTask(speech_text)
-                    tts_task_ref["task"] = task
-                    await app.gpu_queue.put(task)
-                except Exception as e:
-                    print(f"[LOCAL API STREAM] Background TTS error: {e}")
-
         # Stream Audio File Helper Function (Direct Disk Reader at 128kbps broadcast rate)
         async def stream_file_path(path: str):
             if not os.path.exists(path):
@@ -534,57 +698,79 @@ async def stream_live(request: Request, track: str = Query(...), nextTrack: str 
                     yield chunk
                     await asyncio.sleep(0.05)
 
-        # 1. Start background pre-downloads & TTS synthesis FIRST
-        await start_bg_tasks()
+        # Initial host speech intro for Track 1 if passed directly in hostText param
+        if hostText and hostText.strip():
+            cache_path = get_tts_cache_path(hostText.strip())
+            if not (os.path.exists(cache_path) and os.path.getsize(cache_path) > 1000):
+                task = GPUTask(hostText.strip())
+                await app.gpu_queue.put(task)
+                try:
+                    await asyncio.wait_for(task.completion_event.wait(), timeout=15.0)
+                except Exception:
+                    pass
 
-        # 2. Ensure Song A is pre-downloaded on disk before streaming starts!
-        cached_song_a = get_cache_filepath(track)
-        if not os.path.exists(cached_song_a) or os.path.getsize(cached_song_a) < 50000:
-            print(f"[LOCAL API STREAM] Waiting for Song A pre-download: '{track}'...")
-            await pre_download_track(track, ffmpeg_bin)
+            if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1000:
+                print(f"[STREAM] 🎙️ Streaming intro speech: '{hostText[:40]}...'")
+                async for chunk in stream_file_path(cache_path):
+                    yield chunk
 
-        # 3. Stream AI Host Speech Intro FIRST (If speech task exists)
-        task = tts_task_ref["task"]
-        if task:
-            try:
-                print(f"[DEBUG LOG] Waiting for Kokoro TTS task completion...")
-                await asyncio.wait_for(task.completion_event.wait(), timeout=20.0)
-                if os.path.exists(task.result_file):
-                    speech_bytes = os.path.getsize(task.result_file)
-                    print(f"[DEBUG LOG] === BEGIN STREAMING DJ SPEECH ({speech_bytes} bytes) ===")
-                    chunks_count = 0
-                    async for chunk in stream_file_path(task.result_file):
-                        chunks_count += 1
+        # Stream all tracks continuously in a single HTTP response
+        for idx, trk in enumerate(track_list):
+            if await request.is_disconnected():
+                print(f"[STREAM] Client disconnected at track #{idx+1} ({trk})")
+                break
+
+            # 1. Background pre-download upcoming tracks to disk by Track ID
+            trk_id = track_ids_list[idx] if idx < len(track_ids_list) else None
+            asyncio.create_task(pre_download_track(trk, ffmpeg_bin, trk_id))
+            if idx + 1 < len(track_list):
+                next_id = track_ids_list[idx + 1] if idx + 1 < len(track_ids_list) else None
+                asyncio.create_task(pre_download_track(track_list[idx + 1], ffmpeg_bin, next_id))
+            if idx + 2 < len(track_list):
+                third_id = track_ids_list[idx + 2] if idx + 2 < len(track_ids_list) else None
+                asyncio.create_task(pre_download_track(track_list[idx + 2], ffmpeg_bin, third_id))
+
+            # 2. Check if host speech was scheduled for this track (check ID key first, then title key)
+            trk_id_key = normalize_key(trk_id) if trk_id else ""
+            trk_title_key = normalize_key(trk)
+
+            scheduled_text = (pending_speech.get(trk_id_key) if trk_id_key else None) or pending_speech.get(trk_title_key)
+
+            if scheduled_text:
+                speech_cache = get_tts_cache_path(scheduled_text)
+                for _ in range(16):
+                    if os.path.exists(speech_cache) and os.path.getsize(speech_cache) > 1000:
+                        break
+                    await asyncio.sleep(0.5)
+
+                if os.path.exists(speech_cache) and os.path.getsize(speech_cache) > 1000:
+                    print(f"[STREAM] 🎙️ Injecting scheduled speech before Track #{idx+1}: '{trk}' (ID: {trk_id})")
+                    async for chunk in stream_file_path(speech_cache):
                         yield chunk
-                    print(f"[DEBUG LOG] === FINISHED STREAMING DJ SPEECH ({chunks_count} chunks) ===")
-            except Exception as e:
-                print(f"[DEBUG LOG] Host speech error: {e}")
+                    if trk_id_key:
+                        pending_speech.pop(trk_id_key, None)
+                    pending_speech.pop(trk_title_key, None)
+                    print(f"[STREAM] ✅ Speech injection complete for '{trk}'")
+                else:
+                    print(f"[STREAM] ⚠️ Speech for '{trk}' not ready in time, skipping")
 
-        # 4. Stream Song A directly from 0ms disk cache!
-        if os.path.exists(cached_song_a) and os.path.getsize(cached_song_a) > 50000:
-            song_bytes = os.path.getsize(cached_song_a)
-            print(f"[DEBUG LOG] === BEGIN STREAMING SONG A: '{track}' ({song_bytes} bytes) ===")
-            chunks_count = 0
-            async for chunk in stream_file_path(cached_song_a):
-                chunks_count += 1
-                yield chunk
-            print(f"[DEBUG LOG] === FINISHED STREAMING SONG A ({chunks_count} chunks) ===")
-        else:
-            print(f"[DEBUG LOG] === BEGIN STREAMING SONG A VIA LIVE PIPE FALLBACK ===")
-            async for chunk in stream_live_url(track, ffmpeg_bin, request):
-                yield chunk
-            print(f"[DEBUG LOG] === FINISHED STREAMING SONG A VIA LIVE PIPE ===")
+            # 3. Ensure track MP3 is downloaded & cached on disk by Track ID
+            cached_file = get_cache_filepath(trk, trk_id)
+            if not os.path.exists(cached_file) or os.path.getsize(cached_file) < 50000:
+                print(f"[STREAM] Waiting for pre-download of Track #{idx+1}: '{trk}' (ID: {trk_id})...")
+                await pre_download_track(trk, ffmpeg_bin, trk_id)
 
-        # 3. Stream Song B (Pre-downloaded on disk)
-        if nextTrack and nextTrack.strip():
-            cached_song_b = get_cache_filepath(nextTrack)
-            if not os.path.exists(cached_song_b):
-                print(f"[LOCAL API STREAM] Song B not fully cached yet, fetching -> '{nextTrack}'")
-                await pre_download_track(nextTrack, ffmpeg_bin)
-
-            if os.path.exists(cached_song_b):
-                print(f"[LOCAL API STREAM] Streaming Song B directly from 0ms disk cache -> '{nextTrack}'")
-                async for chunk in stream_file_path(cached_song_b):
+            if os.path.exists(cached_file) and os.path.getsize(cached_file) > 50000:
+                song_bytes = os.path.getsize(cached_file)
+                print(f"[STREAM] 🎵 Streaming Track #{idx+1}/{len(track_list)}: '{trk}' ({song_bytes} bytes)")
+                chunks_count = 0
+                async for chunk in stream_file_path(cached_file):
+                    chunks_count += 1
+                    yield chunk
+                print(f"[STREAM] Finished Track #{idx+1}: '{trk}' ({chunks_count} chunks)")
+            else:
+                print(f"[STREAM] Streaming Track #{idx+1} via live fallback pipe...")
+                async for chunk in stream_live_url(trk, ffmpeg_bin, request):
                     yield chunk
 
     return StreamingResponse(

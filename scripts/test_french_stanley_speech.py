@@ -5,6 +5,13 @@ import soundfile as sf
 import numpy as np
 from pathlib import Path
 
+# Auto-create espeak-ng CLI wrapper in .venv/bin if needed
+try:
+    from scripts.create_espeak_wrapper import create_espeak_wrapper
+    create_espeak_wrapper()
+except Exception:
+    pass
+
 # Ensure EspeakWrapper & espeakng_loader compatibility
 try:
     import espeakng_loader
@@ -15,7 +22,7 @@ try:
     os.environ["PHONEMIZER_ESPEAK_LIBRARY"] = lib_path
     os.environ["ESPEAK_DATA_PATH"] = data_path
     os.environ["PHONEMIZER_ESPEAK_PATH"] = os.path.dirname(lib_path)
-except Exception as e:
+except Exception:
     pass
 
 try:

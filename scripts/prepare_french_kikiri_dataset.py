@@ -1,9 +1,11 @@
 import os
 import glob
 import sys
-import argparse
-import static_ffmpeg
-static_ffmpeg.add_paths()
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+except Exception as e:
+    print(f"ℹ️ Note: static_ffmpeg skipped ({e})")
 
 import torch
 import soundfile as sf

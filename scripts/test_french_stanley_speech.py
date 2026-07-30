@@ -5,12 +5,12 @@ import soundfile as sf
 import numpy as np
 from pathlib import Path
 
-# Auto-create espeak-ng CLI wrapper in .venv/bin if needed
+# Ensure espeak-ng binary is unpacked inside .venv
 try:
-    from scripts.create_espeak_wrapper import create_espeak_wrapper
-    create_espeak_wrapper()
-except Exception:
-    pass
+    from scripts.install_espeak_binary import install_espeak_binary
+    install_espeak_binary()
+except Exception as e:
+    print(f"ℹ️ Note on espeak unpacking: {e}")
 
 # Ensure EspeakWrapper & espeakng_loader compatibility
 try:

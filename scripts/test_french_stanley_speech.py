@@ -5,6 +5,17 @@ import soundfile as sf
 import numpy as np
 from pathlib import Path
 
+# Ensure EspeakWrapper compatibility before importing misaki
+try:
+    import phonemizer
+    from phonemizer.backend.espeak.wrapper import EspeakWrapper
+    if not hasattr(EspeakWrapper, 'set_data_path'):
+        EspeakWrapper.set_data_path = staticmethod(lambda *args, **kwargs: None)
+    if not hasattr(EspeakWrapper, 'set_library_path'):
+        EspeakWrapper.set_library_path = staticmethod(lambda *args, **kwargs: None)
+except Exception:
+    pass
+
 # Ensure kikiri-tts and kokoro paths are added
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KIKIRI_DIR = REPO_ROOT / "kikiri-tts"

@@ -40,8 +40,12 @@ if os.path.exists(ESPEAK_SO):
 # Ensure paths
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KIKIRI_DIR = REPO_ROOT / "kikiri-tts" / "StyleTTS2"
+KOKORO_SUBMODULE = KIKIRI_DIR / "kokoro"
+
 if str(KIKIRI_DIR) not in sys.path:
     sys.path.insert(0, str(KIKIRI_DIR))
+if KOKORO_SUBMODULE.exists() and str(KOKORO_SUBMODULE) not in sys.path:
+    sys.path.insert(0, str(KOKORO_SUBMODULE))
 
 def test_direct_neural_inference(
     text_to_speak: str = "Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!",

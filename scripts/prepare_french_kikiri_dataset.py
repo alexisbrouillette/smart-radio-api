@@ -1,6 +1,36 @@
 import os
 import glob
 import sys
+import ctypes
+import ctypes.util
+import types
+
+# Espeak-ng intercept & mock loader
+HOME = os.path.expanduser("~")
+INSTALL_DIR = os.path.join(HOME, "espeak-ng-install")
+ESPEAK_SO = os.path.join(INSTALL_DIR, "lib64", "libespeak-ng.so")
+
+if not os.path.exists(ESPEAK_SO):
+    ESPEAK_SO = os.path.join(INSTALL_DIR, "lib", "libespeak-ng.so")
+
+if os.path.exists(ESPEAK_SO):
+    os.environ["PHONEMIZER_ESPEAK_LIBRARY"] = ESPEAK_SO
+    os.environ["ESPEAK_DATA_PATH"] = os.path.join(INSTALL_DIR, "share")
+    os.environ["PATH"] = f"{os.path.join(INSTALL_DIR, 'bin')}:{os.environ.get('PATH', '')}"
+
+    mock_loader = types.ModuleType("espeakng_loader")
+    mock_loader.get_library_path = lambda: ESPEAK_SO
+    mock_loader.get_data_path = lambda: os.path.join(INSTALL_DIR, "share", "espeak-ng-data")
+    sys.modules["espeakng_loader"] = mock_loader
+
+    _original_find_library = ctypes.util.find_library
+    def _mock_find_library(name):
+        if name in ['espeak-ng', 'espeak']:
+            return ESPEAK_SO
+        return _original_find_library(name)
+    
+    ctypes.util.find_library = _mock_find_library
+
 try:
     import static_ffmpeg
     static_ffmpeg.add_paths()

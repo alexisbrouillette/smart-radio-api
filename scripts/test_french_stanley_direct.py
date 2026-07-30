@@ -114,16 +114,16 @@ def test_direct_neural_inference(
     print(f"  └ IPA Phonemes: [{phonemes}]")
 
     # Map text cleaner (standard Kokoro vocab)
-    from kokoro import KPipeline
-    pipeline = KPipeline(lang_code="f")
-    token_ids = pipeline.g2p.cleaner(phonemes)
+    from kokoro_symbols import TextCleaner
+    cleaner = TextCleaner()
+    token_ids = cleaner(phonemes)
 
     # Extract Stage 2 mini-voicepack
     voicepack, ac_norm, pr_norm = extract_voicepack(model, str(REPO_ROOT / "dataset_french" / "wavs"), device, n_samples=200)
     print(f"  └ Extracted Stage 2 voicepack (Acoustic norm: {ac_norm:.4f}, Prosodic norm: {pr_norm:.4f})")
 
     # Run direct neural network inference
-    results = run_kokoro_inference(model, [(text_to_speak, token_ids)], voicepack, device, pipeline.g2p.cleaner)
+    results = run_kokoro_inference(model, [(text_to_speak, token_ids)], voicepack, device, cleaner)
 
     if results:
         _, audio = results[0]

@@ -64,15 +64,20 @@ def test_stanley_french_speech(
     except Exception as e:
         print(f"⚠️ Espeak check note: {e}")
 
-    # 1. Check Checkpoint
-    if not os.path.exists(checkpoint_path):
-        # Look for latest epoch checkpoint in logs directory
-        log_dir = "kikiri-tts/StyleTTS2/logs/kokoro-french-stanley"
-        if os.path.exists(log_dir):
+    # 1. Check Checkpoint (Prioritize Stage 2 > Stage 1)
+    log_dir = "kikiri-tts/StyleTTS2/logs/kokoro-french-stanley"
+    if os.path.exists(log_dir):
+        second_stage = os.path.join(log_dir, "second_stage.pth")
+        stage2_ckpts = sorted([os.path.join(log_dir, f) for f in os.listdir(log_dir) if "2nd" in f and f.endswith(".pth")])
+        if os.path.exists(second_stage):
+            checkpoint_path = second_stage
+        elif stage2_ckpts:
+            checkpoint_path = stage2_ckpts[-1]
+        else:
             ckpts = sorted([os.path.join(log_dir, f) for f in os.listdir(log_dir) if f.endswith(".pth")])
             if ckpts:
                 checkpoint_path = ckpts[-1]
-                print(f"ℹ️ Found latest checkpoint: {checkpoint_path}")
+    print(f"ℹ️ Using fine-tuned checkpoint: {checkpoint_path}")
 
     if not os.path.exists(checkpoint_path):
         print(f"❌ No trained checkpoint found at '{checkpoint_path}'. Make sure Stage 1 training has saved at least 1 epoch!")
@@ -83,7 +88,7 @@ def test_stanley_french_speech(
     voice_dir.mkdir(exist_ok=True)
     voicepack_path = voice_dir / "stanley_french.pt"
 
-    print(f"[1/3] Extracting Stanley voicepack to {voicepack_path}...")
+    print(f"[1/3] Extracting Stanley Stage 2 voicepack to {voicepack_path}...")
     try:
         from scripts.extract_voicepack import extract_voicepack
         extract_voicepack(

@@ -25,4 +25,5 @@ tqdm
 pandas
 huggingface-hub
 loguru
+espeakng-loader
 git+https://github.com/resemble-ai/monotonic_align.git

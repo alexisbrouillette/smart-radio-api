@@ -1,44 +1,42 @@
 import os
 import sys
+import ctypes
+import ctypes.util
+import types
 import torch
 import soundfile as sf
 import numpy as np
 from pathlib import Path
 
-# Ensure espeak-ng binary is unpacked inside .venv
-try:
-    from scripts.install_espeak_binary import install_espeak_binary
-    install_espeak_binary()
-except Exception as e:
-    print(f"ℹ️ Note on espeak unpacking: {e}")
+# ==============================================================================
+# ESPEAK-NG INTERCEPT & MONKEYPATCH
+# ==============================================================================
+HOME = os.path.expanduser("~")
+INSTALL_DIR = os.path.join(HOME, "espeak-ng-install")
+ESPEAK_SO = os.path.join(INSTALL_DIR, "lib64", "libespeak-ng.so")
 
-# Ensure EspeakWrapper & espeakng_loader compatibility
-try:
-    import espeakng_loader
-    if hasattr(espeakng_loader, 'make_library_available'):
-        espeakng_loader.make_library_available()
-    lib_path = espeakng_loader.get_library_path()
-    data_path = espeakng_loader.get_data_path()
-    os.environ["PHONEMIZER_ESPEAK_LIBRARY"] = lib_path
-    os.environ["ESPEAK_DATA_PATH"] = data_path
-    os.environ["PHONEMIZER_ESPEAK_PATH"] = os.path.dirname(lib_path)
-except Exception:
-    pass
+if not os.path.exists(ESPEAK_SO):
+    ESPEAK_SO = os.path.join(INSTALL_DIR, "lib", "libespeak-ng.so")
 
-try:
-    import phonemizer
-    from phonemizer.backend.espeak.wrapper import EspeakWrapper
-    EspeakWrapper.is_available = staticmethod(lambda: True)
-    if 'lib_path' in locals():
-        EspeakWrapper._ESPEAK_LIBRARY = lib_path
-        try:
-            EspeakWrapper.set_library_path(lib_path)
-        except Exception:
-            pass
-    if not hasattr(EspeakWrapper, 'set_data_path'):
-        EspeakWrapper.set_data_path = staticmethod(lambda *args, **kwargs: None)
-except Exception:
-    pass
+if os.path.exists(ESPEAK_SO):
+    print(f"✅ Intercepting TTS libraries to use: {ESPEAK_SO}")
+    
+    os.environ["PHONEMIZER_ESPEAK_LIBRARY"] = ESPEAK_SO
+    os.environ["ESPEAK_DATA_PATH"] = os.path.join(INSTALL_DIR, "share")
+    os.environ["PATH"] = f"{os.path.join(INSTALL_DIR, 'bin')}:{os.environ.get('PATH', '')}"
+
+    mock_loader = types.ModuleType("espeakng_loader")
+    mock_loader.get_library_path = lambda: ESPEAK_SO
+    mock_loader.get_data_path = lambda: os.path.join(INSTALL_DIR, "share", "espeak-ng-data")
+    sys.modules["espeakng_loader"] = mock_loader
+
+    _original_find_library = ctypes.util.find_library
+    def _mock_find_library(name):
+        if name in ['espeak-ng', 'espeak']:
+            return ESPEAK_SO
+        return _original_find_library(name)
+    
+    ctypes.util.find_library = _mock_find_library
 
 # Ensure kikiri-tts and kokoro paths are added
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -51,18 +49,11 @@ if str(KIKIRI_DIR) not in sys.path:
     sys.path.insert(0, str(KIKIRI_DIR))
 
 def test_stanley_french_speech(
-    checkpoint_path: str = "kikiri-tts/StyleTTS2/logs/kokoro-french-stanley/epoch_00009.pth",
+    checkpoint_path: str = "kikiri-tts/StyleTTS2/logs/kokoro-french-stanley/first_stage.pth",
     text_to_speak: str = "Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!",
     output_path: str = "test_output/stanley_french_sample.wav"
 ):
     print("=== 🎙️ TESTING FRENCH KOKORO TTS (STANLEY VOICE) ===")
-
-    # Enforce espeak-ng binary installation & PATH
-    try:
-        from scripts.install_espeak_binary import install_espeak_binary
-        install_espeak_binary()
-    except Exception as e:
-        print(f"⚠️ Espeak check note: {e}")
 
     # 1. Check Checkpoint (Prioritize Stage 2 > Stage 1)
     log_dir = "kikiri-tts/StyleTTS2/logs/kokoro-french-stanley"
@@ -83,7 +74,7 @@ def test_stanley_french_speech(
         print(f"❌ No trained checkpoint found at '{checkpoint_path}'. Make sure Stage 1 training has saved at least 1 epoch!")
         return
 
-    # 2. Extract Voicepack if not already present
+    # 2. Extract Stage 2 Voicepack
     voice_dir = Path("voices")
     voice_dir.mkdir(exist_ok=True)
     voicepack_path = voice_dir / "stanley_french.pt"
@@ -105,7 +96,7 @@ def test_stanley_french_speech(
     try:
         from kokoro import KModel
         from misaki import espeak
-        
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"  └ Using device: {device}")
 

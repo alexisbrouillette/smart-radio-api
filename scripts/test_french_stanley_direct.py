@@ -1,21 +1,47 @@
 import os
 import sys
+import ctypes
+import ctypes.util
+import types
 import torch
 import soundfile as sf
 from pathlib import Path
+
+# ==============================================================================
+# ESPEAK-NG INTERCEPT & MONKEYPATCH
+# ==============================================================================
+HOME = os.path.expanduser("~")
+INSTALL_DIR = os.path.join(HOME, "espeak-ng-install")
+ESPEAK_SO = os.path.join(INSTALL_DIR, "lib64", "libespeak-ng.so")
+
+if not os.path.exists(ESPEAK_SO):
+    ESPEAK_SO = os.path.join(INSTALL_DIR, "lib", "libespeak-ng.so")
+
+if os.path.exists(ESPEAK_SO):
+    print(f"✅ Intercepting TTS libraries to use: {ESPEAK_SO}")
+    
+    os.environ["PHONEMIZER_ESPEAK_LIBRARY"] = ESPEAK_SO
+    os.environ["ESPEAK_DATA_PATH"] = os.path.join(INSTALL_DIR, "share")
+    os.environ["PATH"] = f"{os.path.join(INSTALL_DIR, 'bin')}:{os.environ.get('PATH', '')}"
+
+    mock_loader = types.ModuleType("espeakng_loader")
+    mock_loader.get_library_path = lambda: ESPEAK_SO
+    mock_loader.get_data_path = lambda: os.path.join(INSTALL_DIR, "share", "espeak-ng-data")
+    sys.modules["espeakng_loader"] = mock_loader
+
+    _original_find_library = ctypes.util.find_library
+    def _mock_find_library(name):
+        if name in ['espeak-ng', 'espeak']:
+            return ESPEAK_SO
+        return _original_find_library(name)
+    
+    ctypes.util.find_library = _mock_find_library
 
 # Ensure paths
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KIKIRI_DIR = REPO_ROOT / "kikiri-tts" / "StyleTTS2"
 if str(KIKIRI_DIR) not in sys.path:
     sys.path.insert(0, str(KIKIRI_DIR))
-
-# Enforce espeak-ng binary installation & PATH
-try:
-    from scripts.install_espeak_binary import install_espeak_binary
-    install_espeak_binary()
-except Exception as e:
-    pass
 
 def test_direct_neural_inference(
     text_to_speak: str = "Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!",

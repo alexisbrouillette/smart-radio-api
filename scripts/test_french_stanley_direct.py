@@ -123,10 +123,50 @@ def test_direct_neural_inference(
     print(f"  └ Extracted Stage 2 voicepack (Acoustic norm: {ac_norm:.4f}, Prosodic norm: {pr_norm:.4f})")
 
     # Run direct neural network inference
-    results = run_kokoro_inference(model, [(text_to_speak, token_ids)], voicepack, device, cleaner)
+    # Apply duration scaling so speech is at natural 1.0x speed (~10s) instead of 15x stretched
+    with torch.no_grad():
+        ref_acoustic = voicepack[:128].unsqueeze(0)
+        ref_prosodic = voicepack[128:].unsqueeze(0)
 
-    if results:
-        _, audio = results[0]
+        input_ids = torch.LongTensor([[0, *token_ids, 0]]).to(device)
+        input_lengths = torch.LongTensor([input_ids.shape[-1]]).to(device)
+        text_mask = torch.gt(
+            torch.arange(input_lengths.max()).unsqueeze(0).expand(1, -1).type_as(input_lengths) + 1,
+            input_lengths.unsqueeze(1),
+        ).to(device)
+
+        bert_dur = model.bert(input_ids, attention_mask=(~text_mask).int())
+        d_en = model.bert_encoder(bert_dur).transpose(-1, -2)
+
+        s_prosodic = ref_prosodic
+        d = model.predictor.text_encoder(d_en, s_prosodic, input_lengths, text_mask)
+        x, _ = model.predictor.lstm(d)
+        duration = model.predictor.duration_proj(x)
+        duration = torch.sigmoid(duration).sum(axis=-1)
+
+        # Scale duration to natural 1.0x pace (approx 10-12s audio duration)
+        pred_dur = torch.round((duration.squeeze() / 12.0)).clamp(min=1).long()
+        if pred_dur.dim() == 0:
+            pred_dur = pred_dur.unsqueeze(0)
+
+        n_tokens = input_ids.shape[1]
+        total_frames = int(pred_dur.sum().item())
+        pred_aln_trg = torch.zeros(n_tokens, total_frames).to(device)
+        c_frame = 0
+        for i in range(n_tokens):
+            dur_i = int(pred_dur[i].item())
+            pred_aln_trg[i, c_frame : c_frame + dur_i] = 1
+            c_frame += dur_i
+        pred_aln_trg = pred_aln_trg.unsqueeze(0)
+
+        en = d.transpose(-1, -2) @ pred_aln_trg
+        F0_pred, N_pred = model.predictor.F0Ntrain(en, s_prosodic)
+
+        t_en = model.text_encoder(input_ids, input_lengths, text_mask)
+        asr = t_en @ pred_aln_trg
+        audio_tensor = model.decoder(asr, F0_pred, N_pred, ref_acoustic)
+        audio = audio_tensor.squeeze().cpu().numpy()
+
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         sf.write(output_path, audio, 24000)
         print(f"\n🎉 [SUCCESS] Direct neural network audio generated successfully!")

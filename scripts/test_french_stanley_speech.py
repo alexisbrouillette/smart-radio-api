@@ -57,6 +57,13 @@ def test_stanley_french_speech(
 ):
     print("=== 🎙️ TESTING FRENCH KOKORO TTS (STANLEY VOICE) ===")
 
+    # Enforce espeak-ng binary installation & PATH
+    try:
+        from scripts.install_espeak_binary import install_espeak_binary
+        install_espeak_binary()
+    except Exception as e:
+        print(f"⚠️ Espeak check note: {e}")
+
     # 1. Check Checkpoint
     if not os.path.exists(checkpoint_path):
         # Look for latest epoch checkpoint in logs directory

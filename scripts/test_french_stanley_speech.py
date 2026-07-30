@@ -53,32 +53,47 @@ def test_stanley_french_speech(
     except Exception as e:
         print(f"⚠️ Voicepack extraction note: {e}")
 
-    # 3. Load Kokoro KPipeline & Voicepack
-    print(f"[2/3] Loading Kokoro KPipeline (French fr-fr)...")
+    # 3. Load Kokoro KModel & French G2P
+    print(f"[2/3] Loading Kokoro KModel and French G2P...")
     try:
-        from kokoro import KPipeline
-        # French pipeline (lang_code='f')
-        pipeline = KPipeline(lang_code="f", repo_id="hexgrad/Kokoro-82M")
+        from kokoro import KModel
+        from misaki import espeak
         
-        voice = torch.load(voicepack_path, map_location="cpu", weights_only=True) if voicepack_path.exists() else None
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"  └ Using device: {device}")
+
+        # Initialize KModel
+        kmodel = KModel(repo_id="hexgrad/Kokoro-82M").to(device).eval()
+
+        # Load extracted voicepack
+        print(f"  └ Loading voicepack from {voicepack_path}...")
+        voice = torch.load(voicepack_path, map_location=device, weights_only=True)
+
+        # French G2P
+        g2p = espeak.EspeakG2P(language="fr-fr")
 
         print(f"[3/3] Synthesizing French speech...")
         print(f"  🗣️ Text: \"{text_to_speak}\"")
 
-        generator = pipeline(text_to_speak, voice=voice, speed=1.0)
-        audio_chunks = []
-        for gs, ps, audio in generator:
-            print(f"  └ IPA Phonemes: [{ps}]")
-            audio_chunks.append(audio)
+        # Phonemize French text
+        phonemes, _ = g2p(text_to_speak)
+        phonemes = phonemes.strip()
+        print(f"  └ IPA Phonemes: [{phonemes}]")
 
-        if audio_chunks:
-            full_audio = np.concatenate(audio_chunks)
+        if len(phonemes) > 510:
+            phonemes = phonemes[:510]
+
+        # Generate audio using KModel directly
+        output = kmodel(phonemes, voice[len(phonemes)-1], 1.0, return_output=True)
+        audio = output.audio.cpu().numpy()
+
+        if len(audio) > 0:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            sf.write(output_path, full_audio, 24000)
+            sf.write(output_path, audio, 24000)
             print(f"\n🎉 [SUCCESS] Audio generated successfully!")
-            print(f"  └ Saved to: {os.path.abspath(output_path)} ({len(full_audio)/24000:.2f}s)")
+            print(f"  └ Saved to: {os.path.abspath(output_path)} ({len(audio)/24000:.2f}s)")
         else:
-            print("⚠️ No audio output returned by generator.")
+            print("⚠️ No audio output returned.")
 
     except Exception as e:
         print(f"❌ Error during speech synthesis: {e}")

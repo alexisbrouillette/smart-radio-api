@@ -4,6 +4,7 @@ import sys
 import ctypes
 import ctypes.util
 import types
+import argparse
 
 # Espeak-ng intercept & mock loader
 HOME = os.path.expanduser("~")

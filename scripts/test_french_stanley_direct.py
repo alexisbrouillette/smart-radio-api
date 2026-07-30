@@ -51,6 +51,9 @@ def test_direct_neural_inference(
     text_to_speak: str = "Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!",
     output_path: str = "test_output/stanley_french_direct_stage2.wav"
 ):
+    # Change CWD to StyleTTS2 directory for relative PLBERT configs
+    os.chdir(KIKIRI_DIR)
+    
     print("=== 🎙️ DIRECT FINE-TUNED NEURAL NETWORK INFERENCE (STAGE 2) ===")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

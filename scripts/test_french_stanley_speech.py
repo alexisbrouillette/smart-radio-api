@@ -5,14 +5,27 @@ import soundfile as sf
 import numpy as np
 from pathlib import Path
 
-# Ensure EspeakWrapper compatibility before importing misaki
+# Ensure EspeakWrapper & espeakng_loader compatibility
+try:
+    import espeakng_loader
+    lib_path = espeakng_loader.get_library_path()
+    data_path = espeakng_loader.get_data_path()
+    os.environ["PHONEMIZER_ESPEAK_LIBRARY"] = lib_path
+    os.environ["ESPEAK_DATA_PATH"] = data_path
+    os.environ["PHONEMIZER_ESPEAK_PATH"] = os.path.dirname(lib_path)
+except Exception:
+    pass
+
 try:
     import phonemizer
     from phonemizer.backend.espeak.wrapper import EspeakWrapper
+    if hasattr(EspeakWrapper, 'set_library_path') and 'lib_path' in locals():
+        try:
+            EspeakWrapper.set_library_path(lib_path)
+        except Exception:
+            pass
     if not hasattr(EspeakWrapper, 'set_data_path'):
         EspeakWrapper.set_data_path = staticmethod(lambda *args, **kwargs: None)
-    if not hasattr(EspeakWrapper, 'set_library_path'):
-        EspeakWrapper.set_library_path = staticmethod(lambda *args, **kwargs: None)
 except Exception:
     pass
 
@@ -80,14 +93,15 @@ def test_stanley_french_speech(
         print(f"  └ Loading voicepack from {voicepack_path}...")
         voice = torch.load(voicepack_path, map_location=device, weights_only=True)
 
-        # French G2P
-        g2p = espeak.EspeakG2P(language="fr-fr")
-
-        print(f"[3/3] Synthesizing French speech...")
-        print(f"  🗣️ Text: \"{text_to_speak}\"")
-
         # Phonemize French text
-        phonemes, _ = g2p(text_to_speak)
+        try:
+            g2p = espeak.EspeakG2P(language="fr-fr")
+            phonemes, _ = g2p(text_to_speak)
+        except Exception as g2p_err:
+            print(f"  ⚠️ misaki G2P note ({g2p_err}), using phonemizer fallback...")
+            import phonemizer
+            phonemes = phonemizer.phonemize(text_to_speak, language="fr-fr", backend="espeak", strip=True)
+
         phonemes = phonemes.strip()
         print(f"  └ IPA Phonemes: [{phonemes}]")
 

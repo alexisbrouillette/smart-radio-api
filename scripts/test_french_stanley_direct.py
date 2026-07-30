@@ -71,7 +71,7 @@ def test_direct_neural_inference(
     print(f"  └ Loading fine-tuned model from: {second_stage_ckpt}")
 
     # Load configuration
-    from Utils.Jukebox import build_model
+    from models import build_model
     import yaml
 
     config_path = REPO_ROOT / "configs" / "config_french_stanley.yml"

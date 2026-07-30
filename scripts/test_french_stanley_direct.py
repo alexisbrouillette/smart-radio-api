@@ -1,0 +1,94 @@
+import os
+import sys
+import torch
+import soundfile as sf
+from pathlib import Path
+
+# Ensure paths
+REPO_ROOT = Path(__file__).resolve().parents[1]
+KIKIRI_DIR = REPO_ROOT / "kikiri-tts" / "StyleTTS2"
+if str(KIKIRI_DIR) not in sys.path:
+    sys.path.insert(0, str(KIKIRI_DIR))
+
+# Enforce espeak-ng binary installation & PATH
+try:
+    from scripts.install_espeak_binary import install_espeak_binary
+    install_espeak_binary()
+except Exception as e:
+    pass
+
+def test_direct_neural_inference(
+    text_to_speak: str = "Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!",
+    output_path: str = "test_output/stanley_french_direct_stage2.wav"
+):
+    print("=== 🎙️ DIRECT FINE-TUNED NEURAL NETWORK INFERENCE (STAGE 2) ===")
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"  └ Using device: {device}")
+
+    log_dir = REPO_ROOT / "kikiri-tts" / "StyleTTS2" / "logs" / "kokoro-french-stanley"
+    second_stage_ckpt = log_dir / "second_stage.pth"
+
+    if not second_stage_ckpt.exists():
+        stage2_ckpts = sorted([log_dir / f for f in os.listdir(log_dir) if "2nd" in f and f.endswith(".pth")])
+        if stage2_ckpts:
+            second_stage_ckpt = stage2_ckpts[-1]
+
+    if not second_stage_ckpt.exists():
+        print(f"❌ Could not find Stage 2 checkpoint in {log_dir}")
+        return
+
+    print(f"  └ Loading fine-tuned model from: {second_stage_ckpt}")
+
+    # Load configuration
+    from Utils.Jukebox import build_model
+    import yaml
+
+    config_path = REPO_ROOT / "configs" / "config_french_stanley.yml"
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    # Build StyleTTS2 / Kokoro model structure
+    model = build_model(config["model_params"], None).to(device)
+
+    # Load Stage 2 checkpoint weights
+    checkpoint = torch.load(second_stage_ckpt, map_location=device)
+    if "net" in checkpoint:
+        model.load_state_dict(checkpoint["net"], strict=False)
+    else:
+        model.load_state_dict(checkpoint, strict=False)
+
+    model.eval()
+
+    # French G2P
+    from misaki import espeak
+    from kokoro_tb_utils import extract_voicepack, run_kokoro_inference
+
+    g2p = espeak.EspeakG2P(language="fr-fr")
+    phonemes, _ = g2p(text_to_speak)
+    phonemes = phonemes.strip()
+
+    print(f"  🗣️ Text: \"{text_to_speak}\"")
+    print(f"  └ IPA Phonemes: [{phonemes}]")
+
+    # Map text cleaner (standard Kokoro vocab)
+    from kokoro import KPipeline
+    pipeline = KPipeline(lang_code="f")
+    token_ids = pipeline.g2p.cleaner(phonemes)
+
+    # Extract Stage 2 mini-voicepack
+    voicepack, ac_norm, pr_norm = extract_voicepack(model, str(REPO_ROOT / "dataset_french" / "wavs"), device, n_samples=200)
+    print(f"  └ Extracted Stage 2 voicepack (Acoustic norm: {ac_norm:.4f}, Prosodic norm: {pr_norm:.4f})")
+
+    # Run direct neural network inference
+    results = run_kokoro_inference(model, [(text_to_speak, token_ids)], voicepack, device, pipeline.g2p.cleaner)
+
+    if results:
+        _, audio = results[0]
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        sf.write(output_path, audio, 24000)
+        print(f"\n🎉 [SUCCESS] Direct neural network audio generated successfully!")
+        print(f"  └ Saved to: {os.path.abspath(output_path)} ({len(audio)/24000:.2f}s)")
+
+if __name__ == "__main__":
+    test_direct_neural_inference()

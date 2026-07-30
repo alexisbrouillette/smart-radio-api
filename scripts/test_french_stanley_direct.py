@@ -72,23 +72,32 @@ def test_direct_neural_inference(
 
     # Load configuration
     from models import build_model
+    from utils import recursive_munch
+    from Utils.PLBERT.util import load_plbert
     import yaml
 
     config_path = REPO_ROOT / "configs" / "config_french_stanley.yml"
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
+    # Load PLBERT
+    BERT_path = config.get("PLBERT_dir", False)
+    plbert = load_plbert(BERT_path)
+
     # Build StyleTTS2 / Kokoro model structure
-    model = build_model(config["model_params"], None).to(device)
+    model_params = recursive_munch(config["model_params"])
+    model = build_model(model_params, None, None, plbert)
 
     # Load Stage 2 checkpoint weights
     checkpoint = torch.load(second_stage_ckpt, map_location=device)
     if "net" in checkpoint:
-        model.load_state_dict(checkpoint["net"], strict=False)
-    else:
-        model.load_state_dict(checkpoint, strict=False)
+        for key in model:
+            if key in checkpoint["net"] and model[key] is not None:
+                model[key].load_state_dict(checkpoint["net"][key], strict=False)
 
-    model.eval()
+    for key in model:
+        if model[key] is not None and hasattr(model[key], "to"):
+            model[key] = model[key].to(device).eval()
 
     # French G2P
     from misaki import espeak

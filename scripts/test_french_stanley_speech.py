@@ -21,6 +21,7 @@ except Exception as e:
 try:
     import phonemizer
     from phonemizer.backend.espeak.wrapper import EspeakWrapper
+    EspeakWrapper.is_available = staticmethod(lambda: True)
     if 'lib_path' in locals():
         EspeakWrapper._ESPEAK_LIBRARY = lib_path
         try:

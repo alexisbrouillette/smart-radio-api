@@ -37,8 +37,8 @@ def generate_xtts_speech(
     checkpoint_path: str = None,
     config_path: str = None,
     ref_audio: str = "functions/xtts_fine-tuned/stanley4.wav",
-    text_to_speak: str = "Bienvenue sur Smart Radio! Je suis Stanley. La prochaine chanson est un morceau exceptionnel de jazz et de soul. Bonne écoute!",
-    output_path: str = "test_output/xtts_stanley_radio_intro.wav",
+    text_to_speak: str = "Bienvenue sur Smart Radio, je suis Stanley en direct. Place maintenant à un monument absolu du jazz et de la soul: Feeling Good par la grande Nina Simone. Composée en 1964 par Anthony Newley et Leslie Bricusse pour la comédie musicale britannique The Roar of the Greasepaint, c'est l'interprétation poignante de Nina Simone en 1965 qui élèvera cette chanson au rang d'hymne universel d'espoir et de liberté. Laissez-vous porter par ses cuivres flamboyants et sa voix magistrale. Bonne écoute sur notre antenne!",
+    output_path: str = "test_output/stanley_100words_single_block.wav",
     language: str = "fr",
     pause_sec: float = 0.0,
     device: str = None

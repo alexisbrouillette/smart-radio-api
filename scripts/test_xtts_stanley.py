@@ -4,6 +4,16 @@ import torch
 from pathlib import Path
 
 # Fix compatibility between modern transformers and Coqui TTS
+import warnings
+warnings.filterwarnings('ignore')
+
+import logging
+try:
+    from transformers import logging as tf_logging
+    tf_logging.set_verbosity_error()
+except Exception:
+    pass
+
 import soundfile as sf
 import torchaudio
 

@@ -43,8 +43,9 @@ def prepare_xtts_dataset(
             res = whisper_model.transcribe(fpath, language="fr")
             text = res.get("text", "").strip()
             if text and len(text) >= 3:
-                # Format: audio_file|text|speaker_name
-                metadata_entries.append(f"{fpath}|{text}|stanley")
+                # Format: rel_audio_file|text|speaker_name (e.g. wavs/stanley_0001.wav|text|stanley)
+                rel_fpath = os.path.relpath(fpath, output_dir)
+                metadata_entries.append(f"{rel_fpath}|{text}|stanley")
                 if (idx + 1) % 25 == 0 or (idx + 1) == len(files):
                     print(f"  └ Transcribed {idx+1}/{len(files)} files... (Latest: '{text[:50]}...')")
         except Exception as e:

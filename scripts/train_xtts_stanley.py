@@ -53,13 +53,6 @@ def run_xtts_training(
         from scripts.prepare_xtts_dataset import prepare_xtts_dataset
         prepare_xtts_dataset(audio_dir="dataset_french/wavs", output_dir="dataset_french")
 
-    # Ensure root-level metadata files exist for Coqui's dataset path loader
-    root_train_csv = "metadata_train.csv"
-    root_eval_csv = "metadata_val.csv"
-    import shutil
-    shutil.copyfile(train_csv, root_train_csv)
-    shutil.copyfile(eval_csv, root_eval_csv)
-
     os.makedirs(output_dir, exist_ok=True)
 
     # 2. Invoke Coqui XTTS train_gpt
@@ -71,8 +64,8 @@ def run_xtts_training(
             num_epochs=epochs,
             batch_size=batch_size,
             grad_acumm=grad_accum,
-            train_csv=root_train_csv,
-            eval_csv=root_eval_csv,
+            train_csv=train_csv,
+            eval_csv=eval_csv,
             output_path=output_dir
         )
 
@@ -81,6 +74,8 @@ def run_xtts_training(
 
     except Exception as e:
         print(f"❌ Error during XTTS Fine-Tuning: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-Tune XTTS-v2 for Stanley Voice")

@@ -40,6 +40,7 @@ def generate_xtts_speech(
     text_to_speak: str = "Bienvenue sur Smart Radio! Je suis Stanley. La prochaine chanson est un morceau exceptionnel de jazz et de soul. Bonne écoute!",
     output_path: str = "test_output/xtts_stanley_radio_intro.wav",
     language: str = "fr",
+    pause_sec: float = 0.6,
     device: str = None
 ):
     print("=== 🎙️ XTTS-v2 FRENCH SPEECH SYNTHESIS (STANLEY) ===")

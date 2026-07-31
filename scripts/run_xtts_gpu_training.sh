@@ -22,6 +22,8 @@ if ! $PYTHON_BIN -c "import TTS" 2>/dev/null; then
     $PYTHON_BIN -m pip install coqui-tts
 fi
 
+OUTPUT_DIR="${1:-functions/xtts_fine-tuned}"
+
 echo "[1/2] Preparing XTTS CSV metadata..."
 $PYTHON_BIN scripts/prepare_xtts_dataset.py --audio-dir dataset_french/wavs --output-dir dataset_french
 
@@ -29,9 +31,9 @@ echo "[2/2] Launching XTTS-v2 Fine-Tuning..."
 $PYTHON_BIN scripts/train_xtts_stanley.py \
   --train-csv dataset_french/metadata_train.csv \
   --eval-csv dataset_french/metadata_val.csv \
-  --output-dir functions/xtts_fine-tuned \
+  --output-dir "$OUTPUT_DIR" \
   --epochs 10 \
   --batch-size 2 \
   --language fr
 
-echo "=== 🎉 TRAINING PIPELINE READY! Checkpoints will be in functions/xtts_fine-tuned/ ==="
+echo "=== 🎉 TRAINING PIPELINE READY! Checkpoints will be in $OUTPUT_DIR ==="

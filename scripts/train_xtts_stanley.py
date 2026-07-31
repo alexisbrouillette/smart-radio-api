@@ -53,9 +53,14 @@ def run_xtts_training(
         from scripts.prepare_xtts_dataset import prepare_xtts_dataset
         prepare_xtts_dataset(audio_dir="dataset_french/wavs", output_dir="dataset_french")
 
-    os.makedirs(output_dir, exist_ok=True)
+    # 2. Convert to absolute paths so Coqui's dataset loader resolves paths cleanly
+    abs_train_csv = os.path.abspath(train_csv)
+    abs_eval_csv = os.path.abspath(eval_csv)
+    abs_output_dir = os.path.abspath(output_dir)
 
-    # 2. Invoke Coqui XTTS train_gpt
+    os.makedirs(abs_output_dir, exist_ok=True)
+
+    # 3. Invoke Coqui XTTS train_gpt
     try:
         from TTS.demos.xtts_ft_demo.utils.gpt_train import train_gpt
 
@@ -64,16 +69,16 @@ def run_xtts_training(
             num_epochs=epochs,
             batch_size=batch_size,
             grad_acumm=grad_accum,
-            train_csv=train_csv,
-            eval_csv=eval_csv,
-            output_path=output_dir
+            train_csv=abs_train_csv,
+            eval_csv=abs_eval_csv,
+            output_path=abs_output_dir
         )
 
         print(f"\n🎉 [SUCCESS] XTTS Fine-Tuning Complete!")
         print(f"  └ Output Checkpoints saved to: {os.path.abspath(trainer_out_path)}")
 
-    except Exception as e:
-        print(f"❌ Error during XTTS Fine-Tuning: {e}")
+    except BaseException as e:
+        print(f"❌ Error during XTTS Fine-Tuning: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
 

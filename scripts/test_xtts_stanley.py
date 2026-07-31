@@ -54,8 +54,15 @@ def generate_xtts_speech(
 
         if checkpoint_path and os.path.exists(checkpoint_path) and config_path and os.path.exists(config_path):
             print(f"[1/2] Loading FINE-TUNED XTTS model from: {checkpoint_path}...")
-            # If checkpoint_path is a file, pass its parent directory as model_path or use Xtts.init_from_config
             model_dir = os.path.dirname(checkpoint_path) if os.path.isfile(checkpoint_path) else checkpoint_path
+            
+            # Ensure model.pth exists in model_dir for Coqui TTS API
+            target_model_pth = os.path.join(model_dir, "model.pth")
+            if not os.path.exists(target_model_pth) and os.path.isfile(checkpoint_path):
+                import shutil
+                print(f"ℹ️ Copying '{os.path.basename(checkpoint_path)}' to 'model.pth'...")
+                shutil.copyfile(checkpoint_path, target_model_pth)
+
             tts = TTS(model_path=model_dir, config_path=config_path, progress_bar=False).to(device)
         else:
             if checkpoint_path:

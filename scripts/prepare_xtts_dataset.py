@@ -17,6 +17,13 @@ def prepare_xtts_dataset(
     output_dir: str = "dataset_french",
     whisper_model_name: str = "base"
 ):
+    train_csv = os.path.join(output_dir, "metadata_train.csv")
+    val_csv = os.path.join(output_dir, "metadata_val.csv")
+
+    if os.path.exists(train_csv) and os.path.exists(val_csv) and os.path.getsize(train_csv) > 100:
+        print(f"✅ XTTS metadata files already exist in '{output_dir}'. Skipping Whisper transcription!")
+        return
+
     print("=== 🎙️ PREPARING XTTS-v2 DATASET ===")
     print(f"ℹ️ Scanning WAV files in: {audio_dir}")
     

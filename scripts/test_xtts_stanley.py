@@ -125,16 +125,18 @@ def generate_xtts_speech(
                 if os.path.exists(tf):
                     os.remove(tf)
         else:
+            print("ℹ️ Generating speech as ONE single continuous unbroken block (zero sentence splitting)...")
             tts.tts_to_file(
                 text=text_to_speak,
                 speaker_wav=ref_audio,
                 language=language,
                 file_path=output_path,
-                temperature=0.70,
-                repetition_penalty=6.0,
+                temperature=0.75,
+                repetition_penalty=5.0,
                 top_k=50,
                 top_p=0.85,
-                speed=1.0
+                speed=1.0,
+                enable_text_splitting=False  # Single continuous unbroken generation
             )
 
         print(f"\n🎉 [SUCCESS] XTTS-v2 Audio generated successfully!")

@@ -53,6 +53,13 @@ def run_xtts_training(
         from scripts.prepare_xtts_dataset import prepare_xtts_dataset
         prepare_xtts_dataset(audio_dir="dataset_french/wavs", output_dir="dataset_french")
 
+    # Ensure root-level metadata files exist for Coqui's dataset path loader
+    root_train_csv = "metadata_train.csv"
+    root_eval_csv = "metadata_val.csv"
+    import shutil
+    shutil.copyfile(train_csv, root_train_csv)
+    shutil.copyfile(eval_csv, root_eval_csv)
+
     os.makedirs(output_dir, exist_ok=True)
 
     # 2. Invoke Coqui XTTS train_gpt
@@ -64,8 +71,8 @@ def run_xtts_training(
             num_epochs=epochs,
             batch_size=batch_size,
             grad_acumm=grad_accum,
-            train_csv=os.path.basename(train_csv),
-            eval_csv=os.path.basename(eval_csv),
+            train_csv=root_train_csv,
+            eval_csv=root_eval_csv,
             output_path=output_dir
         )
 

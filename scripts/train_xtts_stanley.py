@@ -60,27 +60,21 @@ def run_xtts_training(
 
     os.makedirs(abs_output_dir, exist_ok=True)
 
-    # 3. Invoke Coqui XTTS train_gpt
-    try:
-        from TTS.demos.xtts_ft_demo.utils.gpt_train import train_gpt
+    # 3. Invoke Coqui XTTS train_gpt (unwrapped to show full stack trace)
+    from TTS.demos.xtts_ft_demo.utils.gpt_train import train_gpt
 
-        config_file, ckpt_file, vocab_file, trainer_out_path, speaker_ref = train_gpt(
-            language=language,
-            num_epochs=epochs,
-            batch_size=batch_size,
-            grad_acumm=grad_accum,
-            train_csv=abs_train_csv,
-            eval_csv=abs_eval_csv,
-            output_path=abs_output_dir
-        )
+    config_file, ckpt_file, vocab_file, trainer_out_path, speaker_ref = train_gpt(
+        language=language,
+        num_epochs=epochs,
+        batch_size=batch_size,
+        grad_acumm=grad_accum,
+        train_csv=abs_train_csv,
+        eval_csv=abs_eval_csv,
+        output_path=abs_output_dir
+    )
 
-        print(f"\n🎉 [SUCCESS] XTTS Fine-Tuning Complete!")
-        print(f"  └ Output Checkpoints saved to: {os.path.abspath(trainer_out_path)}")
-
-    except BaseException as e:
-        print(f"❌ Error during XTTS Fine-Tuning: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
+    print(f"\n🎉 [SUCCESS] XTTS Fine-Tuning Complete!")
+    print(f"  └ Output Checkpoints saved to: {os.path.abspath(trainer_out_path)}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-Tune XTTS-v2 for Stanley Voice")

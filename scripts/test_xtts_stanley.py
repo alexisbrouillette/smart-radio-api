@@ -40,7 +40,7 @@ def generate_xtts_speech(
     text_to_speak: str = "Bienvenue sur Smart Radio! Je suis Stanley. La prochaine chanson est un morceau exceptionnel de jazz et de soul. Bonne écoute!",
     output_path: str = "test_output/xtts_stanley_radio_intro.wav",
     language: str = "fr",
-    pause_sec: float = 0.6,
+    pause_sec: float = 0.0,
     device: str = None
 ):
     print("=== 🎙️ XTTS-v2 FRENCH SPEECH SYNTHESIS (STANLEY) ===")
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     parser.add_argument("--text", type=str, default="Bienvenue sur Smart Radio! Je suis Stanley. La prochaine chanson est un morceau exceptionnel de jazz et de soul. Bonne écoute!", help="Text to speak")
     parser.add_argument("--output", type=str, default="test_output/xtts_stanley_radio_intro.wav", help="Output WAV file path")
     parser.add_argument("--language", type=str, default="fr", help="Language code (default: 'fr')")
-    parser.add_argument("--pause-sec", type=float, default=0.6, help="Silence pause duration in seconds between sentences")
+    parser.add_argument("--pause-sec", type=float, default=0.0, help="Silence pause duration in seconds between sentences (default: 0.0 for continuous natural speech)")
     parser.add_argument("--device", type=str, default=None, help="Device ('cuda' or 'cpu')")
     args = parser.parse_args()
 

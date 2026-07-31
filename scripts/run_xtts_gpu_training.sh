@@ -12,6 +12,8 @@ elif [ -f ".venv/bin/python" ]; then
     PYTHON_BIN=".venv/bin/python"
 else
     PYTHON_BIN="python"
+fi
+
 echo "ℹ️ Using Python binary: $PYTHON_BIN"
 
 # Check if TTS module is available, if not auto-install coqui-tts

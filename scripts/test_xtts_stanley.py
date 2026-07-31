@@ -71,23 +71,60 @@ def generate_xtts_speech(
                 print("[1/2] Loading XTTS-v2 multilingual model...")
             tts = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2", progress_bar=False).to(device)
 
-        print(f"[2/2] Generating smooth fine-tuned audio for text: '{text_to_speak[:60]}...'")
-        
-        # Punctuation formatting trick: replace abrupt periods with clean radio pauses
-        formatted_text = text_to_speak.replace(". ", "... ").replace("! ", "! ")
+        print(f"[2/2] Generating smooth fine-tuned audio with {pause_sec}s sentence pauses...")
+        import re
+        import numpy as np
 
-        tts.tts_to_file(
-            text=formatted_text,
-            speaker_wav=ref_audio,
-            language=language,
-            file_path=output_path,
-            temperature=0.70,          # Keeps transitions clean and natural
-            repetition_penalty=6.0,    # Eliminates boundary hesitations
-            top_k=50,
-            top_p=0.85,
-            speed=1.0,                 # Natural 1.0x cadence
-            enable_text_splitting=True # Smart sentence-level splitting & cross-fading
-        )
+        # Split text into distinct sentences at punctuation marks (. ! ?)
+        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text_to_speak) if s.strip()]
+        
+        if len(sentences) > 1 and pause_sec > 0:
+            print(f"ℹ️ Split text into {len(sentences)} distinct radio phrases with {pause_sec}s pause padding.")
+            temp_files = []
+            audio_chunks = []
+            sample_rate = 24000
+            silence_samples = np.zeros(int(sample_rate * pause_sec), dtype=np.float32)
+
+            for i, sentence in enumerate(sentences):
+                temp_wav = f"{output_path}_part_{i}.wav"
+                temp_files.append(temp_wav)
+                tts.tts_to_file(
+                    text=sentence,
+                    speaker_wav=ref_audio,
+                    language=language,
+                    file_path=temp_wav,
+                    temperature=0.70,
+                    repetition_penalty=6.0,
+                    top_k=50,
+                    top_p=0.85,
+                    speed=1.0
+                )
+                data, sr = sf.read(temp_wav, dtype="float32")
+                sample_rate = sr
+                audio_chunks.append(data)
+                if i < len(sentences) - 1:
+                    audio_chunks.append(silence_samples)
+
+            # Concatenate all sentence audio chunks with explicit silence padding
+            final_audio = np.concatenate(audio_chunks)
+            sf.write(output_path, final_audio, sample_rate)
+
+            # Cleanup temp part files
+            for tf in temp_files:
+                if os.path.exists(tf):
+                    os.remove(tf)
+        else:
+            tts.tts_to_file(
+                text=text_to_speak,
+                speaker_wav=ref_audio,
+                language=language,
+                file_path=output_path,
+                temperature=0.70,
+                repetition_penalty=6.0,
+                top_k=50,
+                top_p=0.85,
+                speed=1.0
+            )
 
         print(f"\n🎉 [SUCCESS] XTTS-v2 Audio generated successfully!")
         print(f"  └ Saved to: {os.path.abspath(output_path)}")
@@ -103,6 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--text", type=str, default="Bienvenue sur Smart Radio! Je suis Stanley. La prochaine chanson est un morceau exceptionnel de jazz et de soul. Bonne écoute!", help="Text to speak")
     parser.add_argument("--output", type=str, default="test_output/xtts_stanley_radio_intro.wav", help="Output WAV file path")
     parser.add_argument("--language", type=str, default="fr", help="Language code (default: 'fr')")
+    parser.add_argument("--pause-sec", type=float, default=0.6, help="Silence pause duration in seconds between sentences")
     parser.add_argument("--device", type=str, default=None, help="Device ('cuda' or 'cpu')")
     args = parser.parse_args()
 
@@ -113,5 +151,6 @@ if __name__ == "__main__":
         text_to_speak=args.text,
         output_path=args.output,
         language=args.language,
+        pause_sec=args.pause_sec,
         device=args.device
     )

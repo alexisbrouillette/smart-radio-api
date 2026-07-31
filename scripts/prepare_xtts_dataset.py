@@ -63,11 +63,15 @@ def prepare_xtts_dataset(
     train_csv = os.path.join(output_dir, "metadata_train.csv")
     val_csv = os.path.join(output_dir, "metadata_val.csv")
 
+    HEADER = "audio_file|text|speaker_name\n"
+
     with open(train_csv, "w", encoding="utf-8") as f:
+        f.write(HEADER)
         for line in train_entries:
             f.write(f"{line}\n")
 
     with open(val_csv, "w", encoding="utf-8") as f:
+        f.write(HEADER)
         for line in val_entries:
             f.write(f"{line}\n")
 

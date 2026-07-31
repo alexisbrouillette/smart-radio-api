@@ -19,7 +19,8 @@ image = (
         "httpx",
         "pydantic",
         "pydub",
-        "yt-dlp",
+        "yt-dlp[default]",
+        "pyexecjs",
         # TTS
         "kokoro",
         "soundfile",
@@ -41,6 +42,7 @@ image = (
         # Download NLTK data needed by Kokoro
         "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
     )
+    .add_local_file("youtube_cookies.txt", "/root/youtube_cookies.txt")
 )
 
 app = modal.App("smart-radio-api", image=image)
@@ -536,22 +538,31 @@ def fastapi_app():
         except Exception as e:
             print(f"[MODAL STREAM] SoundCloud search error for '{query}': {e}")
 
-        # 2. Try YouTube Search with android_music client fallback
+        # 2. Try YouTube Search with authenticated cookies + format resolution
         try:
-            print(f"[MODAL STREAM] Trying YouTube search fallback for '{query}'...")
+            print(f"[MODAL STREAM] Trying YouTube search with cookies for '{query}'...")
             ydl_opts_yt = {
                 'format': 'bestaudio/best',
                 'quiet': True,
                 'no_warnings': True,
                 'default_search': 'ytsearch1',
-                'extractor_args': {'youtube': {'player_client': ['android_music', 'web']}}
+                'cookiefile': '/root/youtube_cookies.txt'
             }
             with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
                 info = ydl.extract_info(query, download=False)
-                if 'entries' in info and len(info['entries']) > 0 and info['entries'][0].get('url'):
-                    return info['entries'][0]['url']
-                elif info.get('url'):
-                    return info['url']
+                if 'entries' in info and len(info['entries']) > 0:
+                    entry = info['entries'][0]
+                    # Find direct audio format URL
+                    best_url = None
+                    for fmt in entry.get('formats', []):
+                        if 'googlevideo.com' in fmt.get('url', '') and fmt.get('ext') in ('m4a', 'webm', 'mp4', 'opus'):
+                            best_url = fmt['url']
+                            if fmt.get('vcodec') == 'none':
+                                break
+                    url = best_url or entry.get('url')
+                    if url:
+                        print(f"[MODAL STREAM] YouTube resolved stream URL for '{query}' -> {url[:80]}...")
+                        return url
         except Exception as e:
             print(f"[MODAL STREAM] YouTube search error for '{query}': {e}")
 

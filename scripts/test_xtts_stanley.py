@@ -54,7 +54,9 @@ def generate_xtts_speech(
 
         if checkpoint_path and os.path.exists(checkpoint_path) and config_path and os.path.exists(config_path):
             print(f"[1/2] Loading FINE-TUNED XTTS model from: {checkpoint_path}...")
-            tts = TTS(model_path=checkpoint_path, config_path=config_path, progress_bar=False).to(device)
+            # If checkpoint_path is a file, pass its parent directory as model_path or use Xtts.init_from_config
+            model_dir = os.path.dirname(checkpoint_path) if os.path.isfile(checkpoint_path) else checkpoint_path
+            tts = TTS(model_path=model_dir, config_path=config_path, progress_bar=False).to(device)
         else:
             if checkpoint_path:
                 print(f"⚠️ Checkpoint file '{checkpoint_path}' not found locally. Loading base XTTS-v2 model...")
@@ -62,12 +64,18 @@ def generate_xtts_speech(
                 print("[1/2] Loading XTTS-v2 multilingual model...")
             tts = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2", progress_bar=False).to(device)
 
-        print(f"[2/2] Generating audio for text: '{text_to_speak[:60]}...'")
+        print(f"[2/2] Generating broadcast-tuned audio for text: '{text_to_speak[:60]}...'")
         tts.tts_to_file(
             text=text_to_speak,
             speaker_wav=ref_audio,
             language=language,
-            file_path=output_path
+            file_path=output_path,
+            temperature=0.65,          # Lower temp = calmer, stable radio host tone (less voice wobble)
+            repetition_penalty=7.0,    # Higher penalty = zero stuttering or trailing repetitions
+            top_k=50,
+            top_p=0.85,
+            speed=1.02,                # Slightly faster = crisp, professional radio pacing
+            enable_text_splitting=True # Smart sentence boundary splitting
         )
 
         print(f"\n🎉 [SUCCESS] XTTS-v2 Audio generated successfully!")

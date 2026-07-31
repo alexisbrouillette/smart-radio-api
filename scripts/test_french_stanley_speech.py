@@ -58,7 +58,8 @@ def test_stanley_french_speech(
     text_to_speak: str = "Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!",
     output_path: str = "test_output/stanley_french_sample.wav",
     audio_dir: str = "dataset_french/wavs",
-    speed: float = 1.0
+    speed: float = 1.0,
+    blend_french: float = 0.3
 ):
     print("=== 🎙️ TESTING FRENCH KOKORO TTS (STANLEY VOICE) ===")
 
@@ -119,6 +120,13 @@ def test_stanley_french_speech(
         # Initialize Kokoro native French pipeline
         pipeline = KPipeline(lang_code='f', repo_id="hexgrad/Kokoro-82M")
 
+        # Blend with native French intonation (ff_siwis) if requested
+        if blend_french > 0:
+            print(f"  └ Blending {1.0 - blend_french:.0%} Stanley voice + {blend_french:.0%} Native French (ff_siwis) intonation...")
+            native_voice = pipeline.load_voice('ff_siwis')
+            stanley_voice = pipeline.load_voice(voice_input)
+            voice_input = (1.0 - blend_french) * stanley_voice + blend_french * native_voice
+
         # Generate audio using Kokoro Native French Pipeline
         generator = pipeline(text_to_speak, voice=voice_input, speed=speed)
         
@@ -147,6 +155,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="test_output/stanley_french_sample.wav", help="Output WAV file path")
     parser.add_argument("--audio-dir", type=str, default="dataset_french/wavs", help="Path to reference audio dataset WAVs")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed multiplier")
+    parser.add_argument("--blend-french", type=float, default=0.3, help="Blend ratio (0.0 to 1.0) with native French intonation (ff_siwis)")
     args = parser.parse_args()
 
     test_stanley_french_speech(
@@ -155,5 +164,6 @@ if __name__ == "__main__":
         text_to_speak=args.text,
         output_path=args.output,
         audio_dir=args.audio_dir,
-        speed=args.speed
+        speed=args.speed,
+        blend_french=args.blend_french
     )

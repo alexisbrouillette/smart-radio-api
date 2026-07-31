@@ -71,18 +71,22 @@ def generate_xtts_speech(
                 print("[1/2] Loading XTTS-v2 multilingual model...")
             tts = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2", progress_bar=False).to(device)
 
-        print(f"[2/2] Generating broadcast-tuned audio for text: '{text_to_speak[:60]}...'")
+        print(f"[2/2] Generating smooth fine-tuned audio for text: '{text_to_speak[:60]}...'")
+        
+        # Punctuation formatting trick: replace abrupt periods with clean radio pauses
+        formatted_text = text_to_speak.replace(". ", "... ").replace("! ", "! ")
+
         tts.tts_to_file(
-            text=text_to_speak,
+            text=formatted_text,
             speaker_wav=ref_audio,
             language=language,
             file_path=output_path,
-            temperature=0.65,          # Lower temp = calmer, stable radio host tone (less voice wobble)
-            repetition_penalty=7.0,    # Higher penalty = zero stuttering or trailing repetitions
+            temperature=0.70,          # Keeps transitions clean and natural
+            repetition_penalty=6.0,    # Eliminates boundary hesitations
             top_k=50,
             top_p=0.85,
-            speed=1.02,                # Slightly faster = crisp, professional radio pacing
-            enable_text_splitting=True # Smart sentence boundary splitting
+            speed=1.0,                 # Natural 1.0x cadence
+            enable_text_splitting=True # Smart sentence-level splitting & cross-fading
         )
 
         print(f"\n🎉 [SUCCESS] XTTS-v2 Audio generated successfully!")

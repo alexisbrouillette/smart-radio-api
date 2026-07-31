@@ -109,15 +109,15 @@ def test_stanley_french_speech(
     try:
         from kokoro import KPipeline
 
-        # Load voicepack tensor
+        # Load voicepack tensor or path
         print(f"  └ Loading voicepack from {voicepack_file}...")
-        voice = torch.load(str(voicepack_file), map_location=device, weights_only=True)
+        voice_input = str(voicepack_file) if voicepack_file.exists() else voicepack_path
 
         # Initialize Kokoro native French pipeline
         pipeline = KPipeline(lang_code='f', repo_id="hexgrad/Kokoro-82M")
 
         # Generate audio using Kokoro Native French Pipeline
-        generator = pipeline(text_to_speak, voice=voice, speed=speed)
+        generator = pipeline(text_to_speak, voice=voice_input, speed=speed)
         
         audios = []
         for _, _, chunk in generator:

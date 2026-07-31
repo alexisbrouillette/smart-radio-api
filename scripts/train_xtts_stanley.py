@@ -64,8 +64,8 @@ def run_xtts_training(
             num_epochs=epochs,
             batch_size=batch_size,
             grad_acumm=grad_accum,
-            train_csv=train_csv,
-            eval_csv=eval_csv,
+            train_csv=os.path.basename(train_csv),
+            eval_csv=os.path.basename(eval_csv),
             output_path=output_dir
         )
 

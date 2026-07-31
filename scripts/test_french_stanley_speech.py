@@ -3,6 +3,7 @@ import sys
 import ctypes
 import ctypes.util
 import types
+import argparse
 import torch
 import soundfile as sf
 import numpy as np
@@ -49,15 +50,18 @@ if str(KIKIRI_DIR) not in sys.path:
     sys.path.insert(0, str(KIKIRI_DIR))
 
 def test_stanley_french_speech(
-    checkpoint_path: str = "kikiri-tts/StyleTTS2/logs/kokoro-french-stanley/first_stage.pth",
+    checkpoint_path: str = None,
+    voicepack_path: str = "voices/stanley_french.pt",
     text_to_speak: str = "Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!",
-    output_path: str = "test_output/stanley_french_sample.wav"
+    output_path: str = "test_output/stanley_french_sample.wav",
+    audio_dir: str = "dataset_french/wavs",
+    speed: float = 1.0
 ):
     print("=== 🎙️ TESTING FRENCH KOKORO TTS (STANLEY VOICE) ===")
 
-    # 1. Check Checkpoint (Prioritize Stage 2 > Stage 1)
+    # 1. Locate Checkpoint if not specified
     log_dir = "kikiri-tts/StyleTTS2/logs/kokoro-french-stanley"
-    if os.path.exists(log_dir):
+    if not checkpoint_path and os.path.exists(log_dir):
         second_stage = os.path.join(log_dir, "second_stage.pth")
         stage2_ckpts = sorted([os.path.join(log_dir, f) for f in os.listdir(log_dir) if "2nd" in f and f.endswith(".pth")])
         if os.path.exists(second_stage):
@@ -68,69 +72,64 @@ def test_stanley_french_speech(
             ckpts = sorted([os.path.join(log_dir, f) for f in os.listdir(log_dir) if f.endswith(".pth")])
             if ckpts:
                 checkpoint_path = ckpts[-1]
-    print(f"ℹ️ Using fine-tuned checkpoint: {checkpoint_path}")
 
-    if not os.path.exists(checkpoint_path):
-        print(f"❌ No trained checkpoint found at '{checkpoint_path}'. Make sure Stage 1 training has saved at least 1 epoch!")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"ℹ️ Device: {device}")
+
+    # 2. Extract Stage 2 Voicepack if checkpoint exists and voicepack missing or new checkpoint passed
+    voicepack_file = Path(voicepack_path)
+    voicepack_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        print(f"ℹ️ Extracting voicepack from checkpoint: {checkpoint_path}")
+        try:
+            from kokoro_tb_utils import extract_voicepack, build_kokoro_model
+            
+            # Load model and extract
+            model = build_kokoro_model(checkpoint_path, device=device)
+            voicepack, ac_norm, pr_norm = extract_voicepack(
+                model=model,
+                audio_dir=audio_dir if os.path.exists(audio_dir) else "dataset_french/wavs",
+                device=device,
+                n_samples=200
+            )
+            torch.save(voicepack, str(voicepack_file))
+            print(f"  └ Saved voicepack to {voicepack_file} (Acoustic norm: {ac_norm:.4f}, Prosodic norm: {pr_norm:.4f})")
+        except Exception as e:
+            print(f"⚠️ Voicepack extraction note: {e}")
+    
+    # 3. Verify Voicepack Existence
+    if not voicepack_file.exists():
+        print(f"❌ Voicepack file not found at '{voicepack_file}' and no valid checkpoint found at '{checkpoint_path}'.")
+        print("  └ Make sure you have trained a checkpoint or copied your 'stanley_french.pt' into 'voices/'.")
         return
 
-    # 2. Extract Stage 2 Voicepack
-    voice_dir = Path("voices")
-    voice_dir.mkdir(exist_ok=True)
-    voicepack_path = voice_dir / "stanley_french.pt"
-
-    print(f"[1/3] Extracting Stanley Stage 2 voicepack to {voicepack_path}...")
+    # 4. Load Kokoro French Pipeline & Synthesize
+    print(f"[2/2] Synthesizing speech with Kokoro French Native Engine (lang_code='f')...")
     try:
-        from scripts.extract_voicepack import extract_voicepack
-        extract_voicepack(
-            model_path=checkpoint_path,
-            audio_dir="dataset_french/wavs",
-            output_path=str(voicepack_path),
-            device="cuda" if torch.cuda.is_available() else "cpu"
-        )
-    except Exception as e:
-        print(f"⚠️ Voicepack extraction note: {e}")
+        from kokoro import KPipeline
 
-    # 3. Load Kokoro KModel & French G2P
-    print(f"[2/3] Loading Kokoro KModel and French G2P...")
-    try:
-        from kokoro import KModel
-        from misaki import espeak
+        # Load voicepack tensor
+        print(f"  └ Loading voicepack from {voicepack_file}...")
+        voice = torch.load(str(voicepack_file), map_location=device, weights_only=True)
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"  └ Using device: {device}")
+        # Initialize Kokoro native French pipeline
+        pipeline = KPipeline(lang_code='f', repo_id="hexgrad/Kokoro-82M")
 
-        # Initialize KModel
-        kmodel = KModel(repo_id="hexgrad/Kokoro-82M").to(device).eval()
-
-        # Load extracted voicepack
-        print(f"  └ Loading voicepack from {voicepack_path}...")
-        voice = torch.load(voicepack_path, map_location=device, weights_only=True)
-
-        # Phonemize French text
-        try:
-            g2p = espeak.EspeakG2P(language="fr-fr")
-            phonemes, _ = g2p(text_to_speak)
-        except Exception as g2p_err:
-            print(f"  ⚠️ misaki G2P note ({g2p_err}), using phonemizer fallback...")
-            import phonemizer
-            phonemes = phonemizer.phonemize(text_to_speak, language="fr-fr", backend="espeak", strip=True)
-
-        phonemes = phonemes.strip()
-        print(f"  └ IPA Phonemes: [{phonemes}]")
-
-        if len(phonemes) > 510:
-            phonemes = phonemes[:510]
-
-        # Generate audio using KModel directly
-        output = kmodel(phonemes, voice[len(phonemes)-1], 1.0, return_output=True)
-        audio = output.audio.cpu().numpy()
-
-        if len(audio) > 0:
+        # Generate audio using Kokoro Native French Pipeline
+        generator = pipeline(text_to_speak, voice=voice, speed=speed)
+        
+        audios = []
+        for _, _, chunk in generator:
+            if chunk is not None and len(chunk) > 0:
+                audios.append(chunk)
+        
+        if audios:
+            full_audio = np.concatenate(audios)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            sf.write(output_path, audio, 24000)
-            print(f"\n🎉 [SUCCESS] Audio generated successfully!")
-            print(f"  └ Saved to: {os.path.abspath(output_path)} ({len(audio)/24000:.2f}s)")
+            sf.write(output_path, full_audio, 24000)
+            print(f"\n🎉 [SUCCESS] French Stanley Audio generated successfully!")
+            print(f"  └ Saved to: {os.path.abspath(output_path)} ({len(full_audio)/24000:.2f}s)")
         else:
             print("⚠️ No audio output returned.")
 
@@ -138,4 +137,20 @@ def test_stanley_french_speech(
         print(f"❌ Error during speech synthesis: {e}")
 
 if __name__ == "__main__":
-    test_stanley_french_speech()
+    parser = argparse.ArgumentParser(description="Test French Kokoro TTS Stanley Voice")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to .pth checkpoint file")
+    parser.add_argument("--voicepack", type=str, default="voices/stanley_french.pt", help="Path to voicepack .pt file")
+    parser.add_argument("--text", type=str, default="Bonjour et bienvenue sur Smart Radio! C'est Stanley, votre animateur en direct. Aujourd'hui, nous avons un programme musical exceptionnel avec le meilleur du jazz, de la soul et des grands classiques. Restez bien avec nous, la musique continue tout de suite!", help="Text to speak")
+    parser.add_argument("--output", type=str, default="test_output/stanley_french_sample.wav", help="Output WAV file path")
+    parser.add_argument("--audio-dir", type=str, default="dataset_french/wavs", help="Path to reference audio dataset WAVs")
+    parser.add_argument("--speed", type=float, default=1.0, help="Speech speed multiplier")
+    args = parser.parse_args()
+
+    test_stanley_french_speech(
+        checkpoint_path=args.checkpoint,
+        voicepack_path=args.voicepack,
+        text_to_speak=args.text,
+        output_path=args.output,
+        audio_dir=args.audio_dir,
+        speed=args.speed
+    )

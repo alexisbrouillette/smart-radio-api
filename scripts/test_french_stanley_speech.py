@@ -39,11 +39,14 @@ if os.path.exists(ESPEAK_SO):
     
     ctypes.util.find_library = _mock_find_library
 
-# Ensure kikiri-tts and kokoro paths are added
+# Ensure kikiri-tts, StyleTTS2, and kokoro paths are added
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KIKIRI_DIR = REPO_ROOT / "kikiri-tts"
+STYLETTS2_DIR = KIKIRI_DIR / "StyleTTS2"
 KOKORO_SUBMODULE = KIKIRI_DIR / "kokoro"
 
+if STYLETTS2_DIR.exists() and str(STYLETTS2_DIR) not in sys.path:
+    sys.path.insert(0, str(STYLETTS2_DIR))
 if KOKORO_SUBMODULE.exists() and str(KOKORO_SUBMODULE) not in sys.path:
     sys.path.insert(0, str(KOKORO_SUBMODULE))
 if str(KIKIRI_DIR) not in sys.path:

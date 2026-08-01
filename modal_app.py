@@ -213,28 +213,28 @@ def fastapi_app():
     def get_focus_instruction(focus: str) -> tuple[str, str]:
         if focus == "meaning":
             return (
-                "song meaning lyrics writing inspiration origin story interview",
-                "Focus ONLY on the meaning of the song, what inspired the artist to write it, or the story behind the lyrics. Keep it to one simple, human insight."
+                "chanson sens paroles inspiration histoire composition",
+                "Concentre-toi UNIQUEMENT sur le sens de la chanson, l'inspiration de l'artiste ou l'histoire derrière les paroles. Partage une seule anecdote humaine."
             )
         elif focus == "influences":
             return (
-                "musical influences who inspired this song artist background",
-                "Focus ONLY on the artist's musical influences for this song, or who they were listening to or collaborating with when making it. Keep it to one simple, human insight."
+                "influences musicales qui a inspire cette chanson artiste",
+                "Concentre-toi UNIQUEMENT sur les influences musicales de l'artiste pour cette chanson ou ses collaborations. Partage une seule anecdote humaine."
             )
         elif focus == "tour":
             return (
-                "tour dates concerts live show news 2026",
-                "Focus ONLY on upcoming concerts, tour dates, or a notable recent live performance news for the artist. Keep it to one simple, human insight."
+                "concerts tournees spectacle live actualites 2026",
+                "Concentre-toi UNIQUEMENT sur les prochains concerts, tournées ou actualités scéniques récentes de l'artiste. Partage une seule anecdote humaine."
             )
         elif focus == "trivia":
             return (
-                "trivia fun facts behind the scenes production recording process",
-                "Focus ONLY on a single, interesting piece of behind-the-scenes trivia or fun facts about the recording, release, or production of the song. Keep it to one simple, human insight."
+                "anecdotes coulisses enregistrement production faits amusants",
+                "Concentre-toi UNIQUEMENT sur une anecdote originale ou un fait amusant des coulisses de l'enregistrement ou de la production. Partage une seule anecdote humaine."
             )
         else:
             return (
-                "album review critical reception vibe",
-                "Focus ONLY on the general vibe of the song, its critical reception, or how the album was received. Keep it to one simple, human insight."
+                "album ambiance reception critique univers musical",
+                "Concentre-toi UNIQUEMENT sur l'ambiance générale du morceau, son accueil critique ou l'univers de l'album. Partage une seule anecdote humaine."
             )
 
     def radio_host_prompt(prev: Track, nxt: Track, history_str: str, focus_instruction: str) -> str:
@@ -421,7 +421,7 @@ def fastapi_app():
             print(f"Text gen failed: {e}. Using default.")
             prev = tracks[0] if tracks else None
             nxt = tracks[-1] if len(tracks) > 1 else None
-            text = f"That was {prev.name} by {prev.artists}. Up next, {nxt.name} by {nxt.artists}!" if prev and nxt else "Stay tuned!"
+            text = f"C'était {prev.name} par {prev.artists}. Place maintenant à {nxt.name} par {nxt.artists} !" if prev and nxt else "Restez à l'écoute sur Smart Radio !"
 
         last_track = tracks[-1]
         return {
@@ -459,7 +459,7 @@ def fastapi_app():
             print(f"Text gen failed: {e}. Using default.")
             prev = tracks[0] if tracks else None
             nxt = tracks[-1] if len(tracks) > 1 else None
-            text = f"That was {prev.name} by {prev.artists}. Up next, {nxt.name} by {nxt.artists}!" if prev and nxt else "Stay tuned!"
+            text = f"C'était {prev.name} par {prev.artists}. Place maintenant à {nxt.name} par {nxt.artists} !" if prev and nxt else "Restez à l'écoute sur Smart Radio !"
 
         # Generate TTS WAV audio immediately
         task = GPUTask(text)

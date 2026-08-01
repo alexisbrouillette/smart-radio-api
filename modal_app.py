@@ -885,6 +885,9 @@ def fastapi_app():
             generate_radio_chunks(),
             media_type="audio/mpeg",
             headers={
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
                 "Cache-Control": "no-cache, no-store, must-revalidate",
                 "Connection": "keep-alive"
             }

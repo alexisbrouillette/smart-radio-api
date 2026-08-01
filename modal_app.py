@@ -100,6 +100,43 @@ def fastapi_app():
         album: str
         release_year: str
 
+    def parse_track(t: dict) -> Track:
+        if isinstance(t, Track):
+            return t
+        t_id = str(t.get("id", ""))
+        t_name = str(t.get("name", ""))
+        
+        raw_artists = t.get("artists", "")
+        if isinstance(raw_artists, list):
+            artist_names = []
+            for a in raw_artists:
+                if isinstance(a, dict):
+                    artist_names.append(a.get("name", ""))
+                elif isinstance(a, str):
+                    artist_names.append(a)
+            t_artists = ", ".join([name for name in artist_names if name])
+        elif isinstance(raw_artists, dict):
+            t_artists = str(raw_artists.get("name", ""))
+        else:
+            t_artists = str(raw_artists)
+            
+        raw_album = t.get("album", "")
+        if isinstance(raw_album, dict):
+            t_album = str(raw_album.get("name", ""))
+            release_date = str(raw_album.get("release_date", ""))
+            t_year = release_date.split("-")[0] if release_date else ""
+        else:
+            t_album = str(raw_album)
+            t_year = str(t.get("release_year", ""))
+            
+        return Track(
+            id=t_id,
+            name=t_name,
+            artists=t_artists or "Artiste inconnu",
+            album=t_album or "Album",
+            release_year=t_year or ""
+        )
+
     # --------------- Kokoro TTS ---------------
     from kokoro import KPipeline
     pipeline_lock = threading.Lock()
@@ -414,7 +451,7 @@ def fastapi_app():
         else:
             raise HTTPException(status_code=400, detail="Invalid request body")
 
-        tracks = [Track(**t) for t in tracks_data]
+        tracks = [parse_track(t) for t in tracks_data]
         print(f"Received {len(tracks)} tracks and {len(history)} history items")
         try:
             text = await generate_text_for_song(tracks, history)
@@ -450,7 +487,7 @@ def fastapi_app():
         else:
             raise HTTPException(status_code=400, detail="Invalid request body")
 
-        tracks = [Track(**t) for t in tracks_data]
+        tracks = [parse_track(t) for t in tracks_data]
         if not tracks:
             raise HTTPException(status_code=400, detail="No tracks provided")
 
@@ -484,6 +521,27 @@ def fastapi_app():
             "text": text,
             "audio": b64_audio,
         }
+
+    SCHEDULED_HOST_TEXTS = {}
+
+    @fast_app.post("/tts/schedule")
+    async def schedule_tts(request: Request):
+        try:
+            data = await request.json()
+            track_key = data.get("trackKey", "").strip()
+            host_text = data.get("hostText", "").strip()
+            track_id = data.get("trackId", "").strip()
+            
+            if host_text:
+                if track_id:
+                    SCHEDULED_HOST_TEXTS[track_id] = host_text
+                if track_key:
+                    SCHEDULED_HOST_TEXTS[track_key] = host_text
+                print(f"[MODAL TTS SCHEDULE] Scheduled host speech for trackId={track_id}, key='{track_key}': '{host_text[:60]}...'")
+            return {"status": "scheduled", "trackId": track_id}
+        except Exception as e:
+            print(f"[MODAL TTS SCHEDULE ERROR] {e}")
+            return {"status": "error", "message": str(e)}
 
     @fast_app.post("/get_radio_audio")
     async def get_radio_audio(textForAudio: str = Body(...)):
@@ -683,8 +741,13 @@ def fastapi_app():
                 if thirdTrack and thirdTrack.strip():
                     asyncio.create_task(pre_download_modal_track(thirdTrack))
 
-                # 2. Background synthesize DJ host speech
+                # 2. Background synthesize DJ host speech (Check URL param first, then SCHEDULED_HOST_TEXTS)
                 speech_text = hostText
+                if not speech_text or not speech_text.strip():
+                    if nextTrack and nextTrack.strip() in SCHEDULED_HOST_TEXTS:
+                        speech_text = SCHEDULED_HOST_TEXTS[nextTrack.strip()]
+                    elif track and track.strip() in SCHEDULED_HOST_TEXTS:
+                        speech_text = SCHEDULED_HOST_TEXTS[track.strip()]
 
                 if speech_text and speech_text.strip():
                     try:

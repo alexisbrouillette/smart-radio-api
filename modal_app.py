@@ -26,7 +26,8 @@ image = (
         "soundfile",
         "numpy>=1.24.0",
         "torch",
-        "transformers",
+        "torchaudio",
+        "transformers==4.38.2",
         "scipy",
         # Gemini + web search
         "google-genai>=2.0.0",
@@ -766,7 +767,19 @@ def fastapi_app():
         return {"cached_tracks": cached_tracks}
 
     @fast_app.get("/stream/live.mp3")
-    async def stream_live_radio(request: Request, track: str = "Cheikh Lo Sante Yalla", nextTrack: str = None, thirdTrack: str = None, hostText: str = None):
+    async def stream_live_radio(request: Request, track: str = None, tracks: str = None, nextTrack: str = None, thirdTrack: str = None, hostText: str = None):
+        if tracks and tracks.strip():
+            parts = [p.strip() for p in tracks.split("|||") if p.strip()]
+            if parts:
+                track = parts[0]
+                if len(parts) > 1 and not nextTrack:
+                    nextTrack = parts[1]
+                if len(parts) > 2 and not thirdTrack:
+                    thirdTrack = parts[2]
+
+        if not track or not track.strip():
+            track = "Cheikh Lo Sante Yalla"
+
         from fastapi.responses import StreamingResponse
 
         async def generate_radio_chunks():

@@ -602,21 +602,24 @@ def fastapi_app():
         except Exception as e:
             print(f"[MODAL STREAM] SoundCloud search error for '{query}': {e}")
 
-        # 2. Try YouTube Search with authenticated cookies + format resolution
+        # 2. Try YouTube Search with device client signatures (NO COOKIES REQUIRED!)
         try:
-            print(f"[MODAL STREAM] Trying YouTube search with cookies for '{query}'...")
+            print(f"[MODAL STREAM] Trying YouTube search with device signatures for '{clean_query}'...")
             ydl_opts_yt = {
                 'format': 'bestaudio/best',
                 'quiet': True,
                 'no_warnings': True,
                 'default_search': 'ytsearch1',
-                'cookiefile': '/root/youtube_cookies.txt'
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android_vr', 'android', 'tv']
+                    }
+                }
             }
             with yt_dlp.YoutubeDL(ydl_opts_yt) as ydl:
-                info = ydl.extract_info(query, download=False)
+                info = ydl.extract_info(clean_query, download=False)
                 if 'entries' in info and len(info['entries']) > 0:
                     entry = info['entries'][0]
-                    # Find direct audio format URL
                     best_url = None
                     for fmt in entry.get('formats', []):
                         if 'googlevideo.com' in fmt.get('url', '') and fmt.get('ext') in ('m4a', 'webm', 'mp4', 'opus'):
@@ -625,10 +628,10 @@ def fastapi_app():
                                 break
                     url = best_url or entry.get('url')
                     if url:
-                        print(f"[MODAL STREAM] YouTube resolved stream URL for '{query}' -> {url[:80]}...")
+                        print(f"[MODAL STREAM] YouTube resolved stream URL for '{clean_query}' -> {url[:80]}...")
                         return url
         except Exception as e:
-            print(f"[MODAL STREAM] YouTube search error for '{query}': {e}")
+            print(f"[MODAL STREAM] YouTube search error for '{clean_query}': {e}")
 
         return None
 
@@ -780,7 +783,7 @@ def fastapi_app():
             # Start background pre-downloads immediately!
             await start_bg_tasks()
 
-            # Stream Audio File Helper Function (Direct Disk Reader at 128kbps broadcast rate)
+            # Stream Audio File Helper Function (Direct Disk Reader for 64KB HTTP/2 frames)
             async def stream_file_path(path: str):
                 if not os.path.exists(path):
                     return
@@ -788,11 +791,10 @@ def fastapi_app():
                     while True:
                         if await request.is_disconnected():
                             break
-                        chunk = f.read(8192)
+                        chunk = f.read(65536)
                         if not chunk:
                             break
                         yield chunk
-                        await asyncio.sleep(0.05)
 
             # Live URL Stream Fallback Helper
             async def stream_live_url(query: str):
@@ -820,11 +822,11 @@ def fastapi_app():
                     if await request.is_disconnected():
                         proc.kill()
                         break
-                    chunk = await proc.stdout.read(8192)
+                    chunk = await proc.stdout.read(65536)
                     if not chunk:
                         if proc.returncode is not None:
                             break
-                        await asyncio.sleep(0.05)
+                        await asyncio.sleep(0.01)
                         continue
                     yield chunk
                 await proc.wait()

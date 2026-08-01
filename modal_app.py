@@ -10,8 +10,8 @@ import os
 # Image: build once, cached on Modal's servers
 # ---------------------------------------------------------------------------
 image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .apt_install("ffmpeg", "nodejs")
+    modal.Image.debian_slim(python_version="3.10")
+    .apt_install("ffmpeg", "nodejs", "espeak-ng")
     .pip_install(
         # Core server
         "fastapi==0.112",
@@ -21,26 +21,19 @@ image = (
         "pydub",
         "yt-dlp[default]",
         "pyexecjs",
-        # TTS
-        "kokoro",
+        # Coqui XTTS-v2 Stanley TTS
+        "coqui-tts",
         "soundfile",
-        "numpy>=1.26",
+        "numpy>=1.24.0",
         "torch",
-        # Kokoro language dependencies
-        "nltk==3.8.1",
-        "Unidecode==1.3.8",
-        "inflect",
-        "anyascii",
+        "transformers",
+        "scipy",
         # Gemini + web search
         "google-genai>=2.0.0",
         "googlesearch-python",
         "crawl4ai",
         # Crawler deps
         "nest-asyncio",
-    )
-    .run_commands(
-        # Download NLTK data needed by Kokoro
-        "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
     )
     .add_local_file("youtube_cookies.txt", "/root/youtube_cookies.txt")
 )
@@ -53,25 +46,25 @@ app = modal.App("smart-radio-api", image=image)
 secrets = [modal.Secret.from_name("smart-radio-secrets")]
 
 # ---------------------------------------------------------------------------
-# Persistent volume for WAV output files (avoids regenerating on cold starts)
+# Persistent volumes: /audio for cached stream files, /model for Stanley XTTS weights
 # ---------------------------------------------------------------------------
-volume = modal.Volume.from_name("smart-radio-audio", create_if_missing=True)
+audio_volume = modal.Volume.from_name("smart-radio-audio", create_if_missing=True)
+model_volume = modal.Volume.from_name("smart-radio-model", create_if_missing=True)
 AUDIO_DIR = "/audio"
+MODEL_DIR = "/model"
 
 # ---------------------------------------------------------------------------
 # FastAPI app — runs on Modal as an ASGI web endpoint
 # ---------------------------------------------------------------------------
 @app.function(
-    # Use CPU-only (no GPU needed for Kokoro-82M at acceptable speed)
-    # Switch to gpu="t4" if you want faster TTS
+    gpu="t4",
     cpu=2,
     memory=4096,
     timeout=900,
     secrets=secrets,
-    volumes={AUDIO_DIR: volume},
-    # Keep 1 warm container to avoid cold-start delays mid-music
+    volumes={AUDIO_DIR: audio_volume, MODEL_DIR: model_volume},
     min_containers=0,
-    scaledown_window=300,  # 5-minute idle before scale-down
+    scaledown_window=300,
 )
 @modal.concurrent(max_inputs=10)
 @modal.asgi_app()
@@ -137,44 +130,72 @@ def fastapi_app():
             release_year=t_year or ""
         )
 
-    # --------------- Kokoro TTS ---------------
-    from kokoro import KPipeline
-    pipeline_lock = threading.Lock()
-    _pipeline = None
+    # --------------- XTTS-v2 Stanley TTS ---------------
+    from TTS.api import TTS
+    import soundfile as sf
+    from pydub import AudioSegment
 
-    def get_pipeline():
-        nonlocal _pipeline
-        if _pipeline is None:
-            print("Loading Kokoro pipeline...")
-            _pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M')
-            print("Kokoro pipeline loaded.")
-        return _pipeline
+    tts_lock = threading.Lock()
+    _stanley_tts = None
+
+    def get_stanley_tts():
+        nonlocal _stanley_tts
+        if _stanley_tts is None:
+            import torch
+            print("[XTTS] Loading fine-tuned Stanley XTTS-v2 model on GPU...")
+            model_path = os.path.join(MODEL_DIR, "model.pth")
+            config_path = os.path.join(MODEL_DIR, "config.json")
+            
+            if os.path.exists(model_path) and os.path.exists(config_path):
+                _stanley_tts = TTS(
+                    model_path=model_path,
+                    config_path=config_path,
+                    progress_bar=False,
+                    gpu=torch.cuda.is_available()
+                )
+                print("[XTTS] ✅ Fine-tuned Stanley model loaded successfully on GPU!")
+            else:
+                print(f"[XTTS] Warning: {model_path} not found. Fallback to standard XTTS-v2.")
+                _stanley_tts = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2", gpu=torch.cuda.is_available())
+        return _stanley_tts
 
     def synthesize(text: str, output_file: str):
-        pipeline = get_pipeline()
+        tts_instance = get_stanley_tts()
         clean_text = text
         for prefix in ("fr:", "en:"):
             if text.startswith(prefix):
                 clean_text = text[len(prefix):].strip()
-        print(f"Synthesizing: '{clean_text[:60]}...'")
-        with pipeline_lock:
-            generator = pipeline(clean_text, voice='am_michael', speed=1.0)
-            audios = [audio for _, _, audio in generator if audio is not None and len(audio) > 0]
-            if not audios:
-                raise ValueError("Kokoro generated no audio arrays.")
+        print(f"[Stanley TTS] Synthesizing French voice on GPU: '{clean_text[:60]}...'")
+        
+        speaker_wav = os.path.join(MODEL_DIR, "stanley4.wav")
+        if not os.path.exists(speaker_wav):
+            speaker_wav = None
+
+        with tts_lock:
+            temp_wav = output_file + ".tmp.wav"
+            tts_instance.tts_to_file(
+                text=clean_text,
+                speaker_wav=speaker_wav,
+                language="fr",
+                file_path=temp_wav,
+                enable_text_splitting=False
+            )
             
-            wav_temp = output_file if output_file.endswith('.wav') else output_file + '.wav'
-            sf.write(wav_temp, np.concatenate(audios), 24000)
-            
-            # Resample to broadcast 44.1kHz stereo MP3
-            from pydub import AudioSegment
-            sound = AudioSegment.from_wav(wav_temp)
-            sound = sound.set_frame_rate(44100).set_channels(2)
-            mp3_file = output_file.replace('.wav', '.mp3') if output_file.endswith('.wav') else output_file
-            sound.export(mp3_file, format="mp3", bitrate="128k")
-            if os.path.exists(wav_temp) and wav_temp != mp3_file:
-                os.remove(wav_temp)
-            print(f"Saved 44.1kHz stereo MP3 audio to {mp3_file}")
+            # Broadcast Loudness Normalization & Gain Boost (+6.0 dB boost, normalized peak to -0.5 dBFS)
+            try:
+                seg = AudioSegment.from_file(temp_wav)
+                normalized_seg = seg.apply_gain(6.0).normalize(headroom=0.5)
+                mp3_file = output_file.replace('.wav', '.mp3') if output_file.endswith('.wav') else output_file
+                normalized_seg.export(mp3_file, format="mp3", bitrate="128k")
+                # Also save volume-boosted wav if needed
+                normalized_seg.export(output_file, format="wav")
+                if os.path.exists(temp_wav):
+                    os.remove(temp_wav)
+                print(f"[Stanley TTS] ✅ Saved volume-boosted Stanley speech to {output_file}")
+            except Exception as e:
+                print(f"[Stanley TTS Volume Boost Warning] {e}")
+                if os.path.exists(temp_wav):
+                    os.rename(temp_wav, output_file)
 
     # --------------- Text gen ---------------
     from google import genai

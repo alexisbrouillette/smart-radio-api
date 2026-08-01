@@ -529,6 +529,27 @@ def fastapi_app():
             "audio": b64_audio,
         }
 
+    SCHEDULED_HOST_TEXTS = {}
+
+    @fast_app.post("/tts/schedule")
+    async def schedule_tts(request: Request):
+        try:
+            data = await request.json()
+            track_key = data.get("trackKey", "").strip()
+            host_text = data.get("hostText", "").strip()
+            track_id = data.get("trackId", "").strip()
+            
+            if host_text:
+                if track_id:
+                    SCHEDULED_HOST_TEXTS[track_id] = host_text
+                if track_key:
+                    SCHEDULED_HOST_TEXTS[track_key] = host_text
+                print(f"[MODAL TTS SCHEDULE] Scheduled host speech for trackId={track_id}, key='{track_key}': '{host_text[:60]}...'")
+            return {"status": "scheduled", "trackId": track_id}
+        except Exception as e:
+            print(f"[MODAL TTS SCHEDULE ERROR] {e}")
+            return {"status": "error", "message": str(e)}
+
     @fast_app.post("/get_radio_audio")
     async def get_radio_audio(textForAudio: str = Body(...)):
         task = GPUTask(textForAudio)
@@ -713,7 +734,19 @@ def fastapi_app():
         return {"cached_tracks": cached_tracks}
 
     @fast_app.get("/stream/live.mp3")
-    async def stream_live_radio(request: Request, track: str = "Cheikh Lo Sante Yalla", nextTrack: str = None, thirdTrack: str = None, hostText: str = None):
+    async def stream_live_radio(request: Request, track: str = None, tracks: str = None, nextTrack: str = None, thirdTrack: str = None, hostText: str = None):
+        if tracks and tracks.strip():
+            parts = [p.strip() for p in tracks.split("|||") if p.strip()]
+            if parts:
+                track = parts[0]
+                if len(parts) > 1 and not nextTrack:
+                    nextTrack = parts[1]
+                if len(parts) > 2 and not thirdTrack:
+                    thirdTrack = parts[2]
+
+        if not track or not track.strip():
+            track = "Cheikh Lo Sante Yalla"
+
         from fastapi.responses import StreamingResponse
 
         async def generate_radio_chunks():
@@ -727,8 +760,13 @@ def fastapi_app():
                 if thirdTrack and thirdTrack.strip():
                     asyncio.create_task(pre_download_modal_track(thirdTrack))
 
-                # 2. Background synthesize DJ host speech
+                # 2. Background synthesize DJ host speech (Check URL param first, then SCHEDULED_HOST_TEXTS)
                 speech_text = hostText
+                if not speech_text or not speech_text.strip():
+                    if nextTrack and nextTrack.strip() in SCHEDULED_HOST_TEXTS:
+                        speech_text = SCHEDULED_HOST_TEXTS[nextTrack.strip()]
+                    elif track and track.strip() in SCHEDULED_HOST_TEXTS:
+                        speech_text = SCHEDULED_HOST_TEXTS[track.strip()]
 
                 if speech_text and speech_text.strip():
                     try:

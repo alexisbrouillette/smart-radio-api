@@ -756,8 +756,9 @@ def fastapi_app():
             tts_task_ref = {"task": None}
 
             async def start_bg_tasks():
-                # 1. Background pre-download upcoming 3 tracks in parallel!
-                asyncio.create_task(pre_download_modal_track(track))
+                # 1. ALWAYS download active music track FIRST!
+                print(f"[MODAL STREAM] Step 1: Fetching music track audio FIRST -> '{track}'")
+                await pre_download_modal_track(track)
                 if nextTrack and nextTrack.strip():
                     asyncio.create_task(pre_download_modal_track(nextTrack))
                 if thirdTrack and thirdTrack.strip():

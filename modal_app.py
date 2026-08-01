@@ -745,7 +745,7 @@ def fastapi_app():
                     thirdTrack = parts[2]
 
         if not track or not track.strip():
-            track = "Cheikh Lo Sante Yalla"
+            raise HTTPException(status_code=400, detail="No track specified for streaming")
 
         from fastapi.responses import StreamingResponse
 

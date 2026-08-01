@@ -249,12 +249,13 @@ def fastapi_app():
         - Morceau suivant: "{nxt.name}" par {nxt.artists} (de l'album "{nxt.album}", sorti en {nxt.release_year})
         
         Instructions d'animation:
-        1. Recherche sur Google des infos sur l'artiste ou la chanson suivante.
-        2. {focus_instruction}
-        3. Partage UNIQUEMENT cet anecdote/élément de contexte. Ne résume pas toute la carrière de l'artiste.
-        4. Reste un vrai animateur humain:
-           - Évite le ton artificiel et les phrases toutes faites comme "morceau captivant", "chef-d'œuvre absolu", "place à la musique".
-           - N'utilise PAS d'expressions toutes faites comme "C'était...", "À suivre...", "Voici...". Varie tes tournures et reste spontané.
+        1. Fais une rapide transition en mentionnant le morceau qui vient de se terminer ("{prev.name}" par {prev.artists}).
+        2. Présente ensuite en détail le morceau suivant ("{nxt.name}" par {nxt.artists}).
+        3. {focus_instruction}
+        4. Partage UNIQUEMENT cette anecdote/élément de contexte. Ne résume pas toute la carrière de l'artiste.
+        5. Reste un vrai animateur humain:
+           - Évite le ton artificiel et les phrases toutes faites comme "morceau captivant", "chef-d'œuvre absolu".
+           - Varie tes tournures et reste spontané.
         
         Règles de rédaction:
         - Rédige STRICTEMENT en français.
@@ -278,9 +279,11 @@ def fastapi_app():
         {data}
         
         Instructions d'animation:
-        1. {focus_instruction}
-        2. Partage UNIQUEMENT cet anecdote/élément de contexte en utilisant les données ci-dessus.
-        3. Reste un vrai animateur humain:
+        1. Fais une rapide transition en mentionnant le morceau qui vient de se terminer ("{prev.name}" par {prev.artists}).
+        2. Présente ensuite en détail le morceau suivant ("{nxt.name}" par {nxt.artists}).
+        3. {focus_instruction}
+        4. Partage UNIQUEMENT cette anecdote/élément de contexte en utilisant les données ci-dessus.
+        5. Reste un vrai animateur humain:
            - Évite le ton artificiel et les phrases toutes faites.
            - Varie tes ouvertures et fermetures d'antenne.
         

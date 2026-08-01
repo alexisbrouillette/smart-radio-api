@@ -756,13 +756,19 @@ def fastapi_app():
             async def start_bg_tasks():
                 # 1. ALWAYS download active music track FIRST!
                 print(f"[MODAL STREAM] Step 1: Fetching music track audio FIRST -> '{track}'")
-                await pre_download_modal_track(track)
+                track_file = await pre_download_modal_track(track)
+                
+                # ONLY proceed with DJ host speech if music track audio was successfully downloaded & verified!
+                if not track_file or not os.path.exists(track_file):
+                    print(f"[MODAL STREAM] ⚠️ Music track '{track}' not available. Skipping DJ host speech announcement.")
+                    return
+
                 if nextTrack and nextTrack.strip():
                     asyncio.create_task(pre_download_modal_track(nextTrack))
                 if thirdTrack and thirdTrack.strip():
                     asyncio.create_task(pre_download_modal_track(thirdTrack))
 
-                # 2. Background synthesize DJ host speech (Check URL param first, then SCHEDULED_HOST_TEXTS)
+                # 2. Background synthesize DJ host speech ONLY after music track audio is verified on disk
                 speech_text = hostText
                 if not speech_text or not speech_text.strip():
                     if nextTrack and nextTrack.strip() in SCHEDULED_HOST_TEXTS:
@@ -772,7 +778,7 @@ def fastapi_app():
 
                 if speech_text and speech_text.strip():
                     try:
-                        print(f"[MODAL STREAM] Synthesizing background TTS for: '{speech_text[:60]}...'")
+                        print(f"[MODAL STREAM] Synthesizing background TTS for verified music track: '{speech_text[:60]}...'")
                         task = GPUTask(speech_text)
                         tts_task_ref["task"] = task
                         await tts_queue.put(task)

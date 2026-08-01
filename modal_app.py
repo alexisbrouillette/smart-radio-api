@@ -145,22 +145,30 @@ def fastapi_app():
             print("[XTTS] Loading fine-tuned Stanley XTTS-v2 model on GPU...")
             model_path = os.path.join(MODEL_DIR, "model.pth")
             config_path = os.path.join(MODEL_DIR, "config.json")
+            vocab_path = os.path.join(MODEL_DIR, "vocab.json")
             
-            if os.path.exists(model_path) and os.path.exists(config_path):
-                _stanley_tts = TTS(
-                    model_path=model_path,
-                    config_path=config_path,
-                    progress_bar=False,
-                    gpu=torch.cuda.is_available()
-                )
-                print("[XTTS] ✅ Fine-tuned Stanley model loaded successfully on GPU!")
+            if os.path.exists(model_path) and os.path.exists(config_path) and os.path.exists(vocab_path):
+                try:
+                    from TTS.tts.configs.xtts_config import XttsConfig
+                    from TTS.tts.models.xtts import Xtts
+                    config = XttsConfig()
+                    config.load_json(config_path)
+                    model = Xtts.init_from_config(config)
+                    model.load_checkpoint(config, checkpoint_path=model_path, vocab_path=vocab_path, use_deepspeed=False)
+                    if torch.cuda.is_available():
+                        model.cuda()
+                    _stanley_tts = (model, config)
+                    print("[XTTS] ✅ Fine-tuned Stanley model loaded successfully on GPU!")
+                except Exception as e:
+                    print(f"[XTTS] Error loading custom model: {e}. Fallback to standard TTS wrapper.")
+                    _stanley_tts = TTS(model_path=model_path, config_path=config_path, progress_bar=False, gpu=torch.cuda.is_available())
             else:
-                print(f"[XTTS] Warning: {model_path} not found. Fallback to standard XTTS-v2.")
+                print(f"[XTTS] Warning: files not found in {MODEL_DIR}. Fallback to standard XTTS-v2.")
                 _stanley_tts = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2", gpu=torch.cuda.is_available())
         return _stanley_tts
 
     def synthesize(text: str, output_file: str):
-        tts_instance = get_stanley_tts()
+        tts_obj = get_stanley_tts()
         clean_text = text
         for prefix in ("fr:", "en:"):
             if text.startswith(prefix):
@@ -173,13 +181,28 @@ def fastapi_app():
 
         with tts_lock:
             temp_wav = output_file + ".tmp.wav"
-            tts_instance.tts_to_file(
-                text=clean_text,
-                speaker_wav=speaker_wav,
-                language="fr",
-                file_path=temp_wav,
-                enable_text_splitting=False
-            )
+            
+            if isinstance(tts_obj, tuple):
+                model, config = tts_obj
+                gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(audio_path=[speaker_wav])
+                out = model.inference(
+                    text=clean_text,
+                    language="fr",
+                    gpt_cond_latent=gpt_cond_latent,
+                    speaker_embedding=speaker_embedding,
+                    temperature=0.75,
+                    enable_text_splitting=False
+                )
+                import soundfile as sf
+                sf.write(temp_wav, out["wav"], 24000)
+            else:
+                tts_obj.tts_to_file(
+                    text=clean_text,
+                    speaker_wav=speaker_wav,
+                    language="fr",
+                    file_path=temp_wav,
+                    enable_text_splitting=False
+                )
             
             # Broadcast Loudness Normalization & Gain Boost (+6.0 dB boost, normalized peak to -0.5 dBFS)
             try:
@@ -594,29 +617,7 @@ def fastapi_app():
     def fetch_track_audio_url(query: str):
         import yt_dlp
 
-        # 1. Try SoundCloud Search (Fast, 100% unblocked on cloud IPs!)
-        try:
-            print(f"[MODAL STREAM] Searching SoundCloud for '{query}'...")
-            ydl_opts_sc = {
-                'format': 'bestaudio/best',
-                'quiet': True,
-                'no_warnings': True,
-                'default_search': 'scsearch1'
-            }
-            with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
-                info = ydl.extract_info(query, download=False)
-                if 'entries' in info and len(info['entries']) > 0 and info['entries'][0].get('url'):
-                    url = info['entries'][0]['url']
-                    print(f"[MODAL STREAM] SoundCloud resolved URL for '{query}' -> {url[:80]}...")
-                    return url
-                elif info.get('url'):
-                    url = info['url']
-                    print(f"[MODAL STREAM] SoundCloud resolved URL for '{query}' -> {url[:80]}...")
-                    return url
-        except Exception as e:
-            print(f"[MODAL STREAM] SoundCloud search error for '{query}': {e}")
-
-        # 2. Try YouTube Search with authenticated cookies + format resolution
+        # 1. Try YouTube / YouTube Music search with authenticated cookies
         try:
             print(f"[MODAL STREAM] Trying YouTube search with cookies for '{query}'...")
             ydl_opts_yt = {
@@ -630,7 +631,6 @@ def fastapi_app():
                 info = ydl.extract_info(query, download=False)
                 if 'entries' in info and len(info['entries']) > 0:
                     entry = info['entries'][0]
-                    # Find direct audio format URL
                     best_url = None
                     for fmt in entry.get('formats', []):
                         if 'googlevideo.com' in fmt.get('url', '') and fmt.get('ext') in ('m4a', 'webm', 'mp4', 'opus'):
@@ -643,6 +643,24 @@ def fastapi_app():
                         return url
         except Exception as e:
             print(f"[MODAL STREAM] YouTube search error for '{query}': {e}")
+
+        # 2. Fallback to SoundCloud Search
+        try:
+            print(f"[MODAL STREAM] Searching SoundCloud fallback for '{query}'...")
+            ydl_opts_sc = {
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'no_warnings': True,
+                'default_search': 'scsearch1'
+            }
+            with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
+                info = ydl.extract_info(query, download=False)
+                if 'entries' in info and len(info['entries']) > 0 and info['entries'][0].get('url'):
+                    url = info['entries'][0]['url']
+                    print(f"[MODAL STREAM] SoundCloud resolved URL for '{query}' -> {url[:80]}...")
+                    return url
+        except Exception as e:
+            print(f"[MODAL STREAM] SoundCloud fallback error for '{query}': {e}")
 
         return None
 

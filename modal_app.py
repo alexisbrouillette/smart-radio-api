@@ -580,31 +580,11 @@ def fastapi_app():
     def fetch_track_audio_url(query: str):
         import yt_dlp
 
-        # 1. Try SoundCloud Search (Fast, 100% unblocked on cloud IPs!)
-        try:
-            print(f"[MODAL STREAM] Searching SoundCloud for '{query}'...")
-            ydl_opts_sc = {
-                'format': 'bestaudio/best',
-                'quiet': True,
-                'no_warnings': True,
-                'default_search': 'scsearch1'
-            }
-            with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
-                info = ydl.extract_info(query, download=False)
-                if 'entries' in info and len(info['entries']) > 0 and info['entries'][0].get('url'):
-                    url = info['entries'][0]['url']
-                    print(f"[MODAL STREAM] SoundCloud resolved URL for '{query}' -> {url[:80]}...")
-                    return url
-                elif info.get('url'):
-                    url = info['url']
-                    print(f"[MODAL STREAM] SoundCloud resolved URL for '{query}' -> {url[:80]}...")
-                    return url
-        except Exception as e:
-            print(f"[MODAL STREAM] SoundCloud search error for '{query}': {e}")
+        clean_query = query.replace("|||", " ").strip()
 
-        # 2. Try YouTube Search with device client signatures (NO COOKIES REQUIRED!)
+        # 1. Try YouTube Search FIRST (Exact studio track accuracy via hardware device signatures, NO COOKIES REQUIRED!)
         try:
-            print(f"[MODAL STREAM] Trying YouTube search with device signatures for '{clean_query}'...")
+            print(f"[MODAL STREAM] Searching YouTube Music for '{clean_query}'...")
             ydl_opts_yt = {
                 'format': 'bestaudio/best',
                 'quiet': True,
@@ -628,10 +608,28 @@ def fastapi_app():
                                 break
                     url = best_url or entry.get('url')
                     if url:
-                        print(f"[MODAL STREAM] YouTube resolved stream URL for '{clean_query}' -> {url[:80]}...")
+                        print(f"[MODAL STREAM] YouTube resolved exact track URL for '{clean_query}' -> {url[:80]}...")
                         return url
         except Exception as e:
             print(f"[MODAL STREAM] YouTube search error for '{clean_query}': {e}")
+
+        # 2. Try SoundCloud Search Fallback
+        try:
+            print(f"[MODAL STREAM] Searching SoundCloud fallback for '{clean_query}'...")
+            ydl_opts_sc = {
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'no_warnings': True,
+                'default_search': 'scsearch1'
+            }
+            with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
+                info = ydl.extract_info(clean_query, download=False)
+                if 'entries' in info and len(info['entries']) > 0 and info['entries'][0].get('url'):
+                    url = info['entries'][0]['url']
+                    print(f"[MODAL STREAM] SoundCloud fallback resolved URL for '{clean_query}' -> {url[:80]}...")
+                    return url
+        except Exception as e:
+            print(f"[MODAL STREAM] SoundCloud fallback error for '{clean_query}': {e}")
 
         return None
 

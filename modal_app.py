@@ -94,43 +94,6 @@ def fastapi_app():
         album: str
         release_year: str
 
-    def parse_track(t: dict) -> Track:
-        if isinstance(t, Track):
-            return t
-        t_id = str(t.get("id", ""))
-        t_name = str(t.get("name", ""))
-        
-        raw_artists = t.get("artists", "")
-        if isinstance(raw_artists, list):
-            artist_names = []
-            for a in raw_artists:
-                if isinstance(a, dict):
-                    artist_names.append(a.get("name", ""))
-                elif isinstance(a, str):
-                    artist_names.append(a)
-            t_artists = ", ".join([name for name in artist_names if name])
-        elif isinstance(raw_artists, dict):
-            t_artists = str(raw_artists.get("name", ""))
-        else:
-            t_artists = str(raw_artists)
-            
-        raw_album = t.get("album", "")
-        if isinstance(raw_album, dict):
-            t_album = str(raw_album.get("name", ""))
-            release_date = str(raw_album.get("release_date", ""))
-            t_year = release_date.split("-")[0] if release_date else ""
-        else:
-            t_album = str(raw_album)
-            t_year = str(t.get("release_year", ""))
-            
-        return Track(
-            id=t_id,
-            name=t_name,
-            artists=t_artists or "Artiste inconnu",
-            album=t_album or "Album",
-            release_year=t_year or ""
-        )
-
     # --------------- XTTS-v2 Stanley TTS ---------------
     from TTS.api import TTS
     import soundfile as sf
@@ -211,7 +174,6 @@ def fastapi_app():
                 normalized_seg = seg.apply_gain(6.0).normalize(headroom=0.5)
                 mp3_file = output_file.replace('.wav', '.mp3') if output_file.endswith('.wav') else output_file
                 normalized_seg.export(mp3_file, format="mp3", bitrate="128k")
-                # Also save volume-boosted wav if needed
                 normalized_seg.export(output_file, format="wav")
                 if os.path.exists(temp_wav):
                     os.remove(temp_wav)
@@ -496,7 +458,7 @@ def fastapi_app():
         else:
             raise HTTPException(status_code=400, detail="Invalid request body")
 
-        tracks = [parse_track(t) for t in tracks_data]
+        tracks = [Track(**t) for t in tracks_data]
         print(f"Received {len(tracks)} tracks and {len(history)} history items")
         try:
             text = await generate_text_for_song(tracks, history)
@@ -506,7 +468,7 @@ def fastapi_app():
             print(f"Text gen failed: {e}. Using default.")
             prev = tracks[0] if tracks else None
             nxt = tracks[-1] if len(tracks) > 1 else None
-            text = f"C'était {prev.name} par {prev.artists}. Place maintenant à {nxt.name} par {nxt.artists} !" if prev and nxt else "Restez à l'écoute sur Smart Radio !"
+            text = f"That was {prev.name} by {prev.artists}. Up next, {nxt.name} by {nxt.artists}!" if prev and nxt else "Stay tuned!"
 
         last_track = tracks[-1]
         return {
@@ -532,7 +494,7 @@ def fastapi_app():
         else:
             raise HTTPException(status_code=400, detail="Invalid request body")
 
-        tracks = [parse_track(t) for t in tracks_data]
+        tracks = [Track(**t) for t in tracks_data]
         if not tracks:
             raise HTTPException(status_code=400, detail="No tracks provided")
 
@@ -544,7 +506,7 @@ def fastapi_app():
             print(f"Text gen failed: {e}. Using default.")
             prev = tracks[0] if tracks else None
             nxt = tracks[-1] if len(tracks) > 1 else None
-            text = f"C'était {prev.name} par {prev.artists}. Place maintenant à {nxt.name} par {nxt.artists} !" if prev and nxt else "Restez à l'écoute sur Smart Radio !"
+            text = f"That was {prev.name} by {prev.artists}. Up next, {nxt.name} by {nxt.artists}!" if prev and nxt else "Stay tuned!"
 
         # Generate TTS WAV audio immediately
         task = GPUTask(text)
@@ -566,27 +528,6 @@ def fastapi_app():
             "text": text,
             "audio": b64_audio,
         }
-
-    SCHEDULED_HOST_TEXTS = {}
-
-    @fast_app.post("/tts/schedule")
-    async def schedule_tts(request: Request):
-        try:
-            data = await request.json()
-            track_key = data.get("trackKey", "").strip()
-            host_text = data.get("hostText", "").strip()
-            track_id = data.get("trackId", "").strip()
-            
-            if host_text:
-                if track_id:
-                    SCHEDULED_HOST_TEXTS[track_id] = host_text
-                if track_key:
-                    SCHEDULED_HOST_TEXTS[track_key] = host_text
-                print(f"[MODAL TTS SCHEDULE] Scheduled host speech for trackId={track_id}, key='{track_key}': '{host_text[:60]}...'")
-            return {"status": "scheduled", "trackId": track_id}
-        except Exception as e:
-            print(f"[MODAL TTS SCHEDULE ERROR] {e}")
-            return {"status": "error", "message": str(e)}
 
     @fast_app.post("/get_radio_audio")
     async def get_radio_audio(textForAudio: str = Body(...)):
@@ -618,7 +559,29 @@ def fastapi_app():
     def fetch_track_audio_url(query: str):
         import yt_dlp
 
-        # 1. Try YouTube / YouTube Music search with authenticated cookies
+        # 1. Try SoundCloud Search (Fast, 100% unblocked on cloud IPs!)
+        try:
+            print(f"[MODAL STREAM] Searching SoundCloud for '{query}'...")
+            ydl_opts_sc = {
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'no_warnings': True,
+                'default_search': 'scsearch1'
+            }
+            with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
+                info = ydl.extract_info(query, download=False)
+                if 'entries' in info and len(info['entries']) > 0 and info['entries'][0].get('url'):
+                    url = info['entries'][0]['url']
+                    print(f"[MODAL STREAM] SoundCloud resolved URL for '{query}' -> {url[:80]}...")
+                    return url
+                elif info.get('url'):
+                    url = info['url']
+                    print(f"[MODAL STREAM] SoundCloud resolved URL for '{query}' -> {url[:80]}...")
+                    return url
+        except Exception as e:
+            print(f"[MODAL STREAM] SoundCloud search error for '{query}': {e}")
+
+        # 2. Try YouTube Search with authenticated cookies + format resolution
         try:
             print(f"[MODAL STREAM] Trying YouTube search with cookies for '{query}'...")
             ydl_opts_yt = {
@@ -632,6 +595,7 @@ def fastapi_app():
                 info = ydl.extract_info(query, download=False)
                 if 'entries' in info and len(info['entries']) > 0:
                     entry = info['entries'][0]
+                    # Find direct audio format URL
                     best_url = None
                     for fmt in entry.get('formats', []):
                         if 'googlevideo.com' in fmt.get('url', '') and fmt.get('ext') in ('m4a', 'webm', 'mp4', 'opus'):
@@ -644,24 +608,6 @@ def fastapi_app():
                         return url
         except Exception as e:
             print(f"[MODAL STREAM] YouTube search error for '{query}': {e}")
-
-        # 2. Fallback to SoundCloud Search
-        try:
-            print(f"[MODAL STREAM] Searching SoundCloud fallback for '{query}'...")
-            ydl_opts_sc = {
-                'format': 'bestaudio/best',
-                'quiet': True,
-                'no_warnings': True,
-                'default_search': 'scsearch1'
-            }
-            with yt_dlp.YoutubeDL(ydl_opts_sc) as ydl:
-                info = ydl.extract_info(query, download=False)
-                if 'entries' in info and len(info['entries']) > 0 and info['entries'][0].get('url'):
-                    url = info['entries'][0]['url']
-                    print(f"[MODAL STREAM] SoundCloud resolved URL for '{query}' -> {url[:80]}...")
-                    return url
-        except Exception as e:
-            print(f"[MODAL STREAM] SoundCloud fallback error for '{query}': {e}")
 
         return None
 
@@ -767,19 +713,7 @@ def fastapi_app():
         return {"cached_tracks": cached_tracks}
 
     @fast_app.get("/stream/live.mp3")
-    async def stream_live_radio(request: Request, track: str = None, tracks: str = None, nextTrack: str = None, thirdTrack: str = None, hostText: str = None):
-        if tracks and tracks.strip():
-            parts = [p.strip() for p in tracks.split("|||") if p.strip()]
-            if parts:
-                track = parts[0]
-                if len(parts) > 1 and not nextTrack:
-                    nextTrack = parts[1]
-                if len(parts) > 2 and not thirdTrack:
-                    thirdTrack = parts[2]
-
-        if not track or not track.strip():
-            track = "Cheikh Lo Sante Yalla"
-
+    async def stream_live_radio(request: Request, track: str = "Cheikh Lo Sante Yalla", nextTrack: str = None, thirdTrack: str = None, hostText: str = None):
         from fastapi.responses import StreamingResponse
 
         async def generate_radio_chunks():
@@ -793,13 +727,8 @@ def fastapi_app():
                 if thirdTrack and thirdTrack.strip():
                     asyncio.create_task(pre_download_modal_track(thirdTrack))
 
-                # 2. Background synthesize DJ host speech (Check URL param first, then SCHEDULED_HOST_TEXTS)
+                # 2. Background synthesize DJ host speech
                 speech_text = hostText
-                if not speech_text or not speech_text.strip():
-                    if nextTrack and nextTrack.strip() in SCHEDULED_HOST_TEXTS:
-                        speech_text = SCHEDULED_HOST_TEXTS[nextTrack.strip()]
-                    elif track and track.strip() in SCHEDULED_HOST_TEXTS:
-                        speech_text = SCHEDULED_HOST_TEXTS[track.strip()]
 
                 if speech_text and speech_text.strip():
                     try:

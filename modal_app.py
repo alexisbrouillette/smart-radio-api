@@ -754,21 +754,15 @@ def fastapi_app():
             tts_task_ref = {"task": None}
 
             async def start_bg_tasks():
-                # 1. ALWAYS download active music track FIRST!
-                print(f"[MODAL STREAM] Step 1: Fetching music track audio FIRST -> '{track}'")
-                track_file = await pre_download_modal_track(track)
-                
-                # ONLY proceed with DJ host speech if music track audio was successfully downloaded & verified!
-                if not track_file or not os.path.exists(track_file):
-                    print(f"[MODAL STREAM] ⚠️ Music track '{track}' not available. Skipping DJ host speech announcement.")
-                    return
-
+                # 1. Background pre-download music tracks to disk
+                print(f"[MODAL STREAM] Background pre-downloading music tracks -> '{track}'")
+                asyncio.create_task(pre_download_modal_track(track))
                 if nextTrack and nextTrack.strip():
                     asyncio.create_task(pre_download_modal_track(nextTrack))
                 if thirdTrack and thirdTrack.strip():
                     asyncio.create_task(pre_download_modal_track(thirdTrack))
 
-                # 2. Background synthesize DJ host speech ONLY after music track audio is verified on disk
+                # 2. Background synthesize DJ host speech
                 speech_text = hostText
                 if not speech_text or not speech_text.strip():
                     if nextTrack and nextTrack.strip() in SCHEDULED_HOST_TEXTS:
@@ -778,15 +772,15 @@ def fastapi_app():
 
                 if speech_text and speech_text.strip():
                     try:
-                        print(f"[MODAL STREAM] Synthesizing background TTS for verified music track: '{speech_text[:60]}...'")
+                        print(f"[MODAL STREAM] Synthesizing background TTS for host text: '{speech_text[:60]}...'")
                         task = GPUTask(speech_text)
                         tts_task_ref["task"] = task
                         await tts_queue.put(task)
                     except Exception as e:
                         print(f"Background TTS trigger error: {e}")
 
-            # Start background pre-downloads immediately!
-            await start_bg_tasks()
+            # Launch background tasks non-blocking so stream starts in <0.5s
+            asyncio.create_task(start_bg_tasks())
 
             # Stream Audio File Helper Function (Direct Disk Reader for 64KB HTTP/2 frames)
             async def stream_file_path(path: str):
@@ -849,17 +843,15 @@ def fastapi_app():
                 except Exception as e:
                     print(f"Host speech intro skipped: {e}")
 
-            # 2. Stream Song A (Check disk cache first, else fallback to live URL)
+            # 2. Stream Song A (Check disk cache first, else fallback to instant live URL stream)
             cached_song_a = get_modal_cache_filepath(track)
-            if not os.path.exists(cached_song_a):
-                await pre_download_modal_track(track)
-
             if os.path.exists(cached_song_a):
                 print(f"[MODAL STREAM] Streaming Song A from disk cache -> '{track}'")
                 async for chunk in stream_file_path(cached_song_a):
                     yield chunk
             else:
-                print(f"[MODAL STREAM] Disk cache miss, streaming Song A via live URL fallback -> '{track}'")
+                print(f"[MODAL STREAM] Disk cache miss, streaming Song A instantly via live URL -> '{track}'")
+                asyncio.create_task(pre_download_modal_track(track))
                 yielded_any = False
                 async for chunk in stream_live_url(track):
                     yielded_any = True
